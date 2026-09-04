@@ -476,9 +476,9 @@
                                   Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}" />
                         <ComboBox ItemsSource="{Binding PenumbraCollectionFilters}"
                                   SelectedItem="{Binding PenumbraCollectionFilter}"
-                                  IsEditable="True" Width="160" Margin="0,0,14,0"
+                                  Width="180" Margin="0,0,14,0"
                                   Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}"
-                                  ToolTip="Nur Mods aus dieser Collection (leer = alle)" />
+                                  ToolTip="Nur Mods aus dieser Collection" />
                         <TextBlock Text="Sort:" VerticalAlignment="Center" Foreground="{DynamicResource TextDim}" Margin="0,0,6,0" />
                         <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SelectedSort}"
                                   Width="190" Margin="0,0,14,0" />

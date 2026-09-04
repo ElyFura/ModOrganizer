@@ -38,66 +38,108 @@ public sealed class PenumbraSnapshot
     public IReadOnlyList<PenumbraCollection> Collections { get; init; } = Array.Empty<PenumbraCollection>();
     public IReadOnlyList<PenumbraEntry> Entries { get; init; } = Array.Empty<PenumbraEntry>();
 
-    private readonly Dictionary<string, PenumbraEntry> _byFolder = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, PenumbraEntry> _byNormalized = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<PenumbraEntry>> _byFolder = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<PenumbraEntry>> _byNormalized = new(StringComparer.Ordinal);
     private readonly List<(HashSet<string> Tokens, PenumbraEntry Entry)> _byTokens = new();
     private bool _indexed;
+
+    private static void Add(Dictionary<string, List<PenumbraEntry>> index, string key, PenumbraEntry entry)
+    {
+        if (!index.TryGetValue(key, out var list))
+        {
+            list = new List<PenumbraEntry>();
+            index[key] = list;
+        }
+        if (!list.Contains(entry)) list.Add(entry);
+    }
 
     private void EnsureIndex()
     {
         if (_indexed) return;
         foreach (var e in Entries)
         {
-            if (!string.IsNullOrEmpty(e.FolderName)) _byFolder[e.FolderName] = e;
-            if (!string.IsNullOrEmpty(e.MetaName)) _byFolder.TryAdd(e.MetaName!, e);
+            // Every key maps to a LIST. Users routinely keep several Penumbra copies of the
+            // same mod — "[Nimpy] Sphynx revamped" plus "… (2)", or two Aerin variants under
+            // different folder names — and those normalize to the same string. Keeping only
+            // the first made the other copy unreachable, so a collection that contained only
+            // that copy looked empty.
+            if (!string.IsNullOrEmpty(e.FolderName)) Add(_byFolder, e.FolderName, e);
+            if (!string.IsNullOrEmpty(e.MetaName)) Add(_byFolder, e.MetaName!, e);
 
             foreach (var key in new[] { e.FolderName, e.MetaName })
             {
                 if (string.IsNullOrEmpty(key)) continue;
                 var n = PenumbraService.Normalize(key!);
                 if (n.Length < 4) continue;
-                _byNormalized.TryAdd(n, e);
+                Add(_byNormalized, n, e);
                 var toks = PenumbraService.Tokenize(n);
-                if (toks.Count >= 2) _byTokens.Add((toks, e));
+                if (toks.Count >= 1) _byTokens.Add((toks, e));
             }
         }
         _indexed = true;
     }
 
-    public PenumbraEntry? Lookup(string name)
+    /// <summary>Highest status among all matches; drives the card badge.</summary>
+    public PenumbraEntry? Lookup(string name) =>
+        LookupAll(name).OrderByDescending(e => (int)e.Status).FirstOrDefault();
+
+    /// <summary>
+    /// Every Penumbra entry that plausibly is this library mod. Returning all of them is
+    /// what lets the collection filter see a mod whose *other* copy is the enabled one.
+    /// </summary>
+    public IReadOnlyList<PenumbraEntry> LookupAll(string name)
     {
-        if (string.IsNullOrEmpty(name)) return null;
+        if (string.IsNullOrEmpty(name)) return Array.Empty<PenumbraEntry>();
         EnsureIndex();
 
         if (_byFolder.TryGetValue(name, out var exact)) return exact;
 
         var norm = PenumbraService.Normalize(name);
-        if (norm.Length < 4) return null;
+        if (norm.Length < 4) return Array.Empty<PenumbraEntry>();
         if (_byNormalized.TryGetValue(norm, out var n)) return n;
 
         // Substring (both directions, shorter side ≥ 6).
-        PenumbraEntry? bestSub = null;
-        foreach (var (other, entry) in _byNormalized)
+        var subs = new List<PenumbraEntry>();
+        foreach (var (other, entries) in _byNormalized)
         {
             if (Math.Min(norm.Length, other.Length) < 6) continue;
-            if (norm.Contains(other) || other.Contains(norm))
-            {
-                if (bestSub is null || (int)entry.Status > (int)bestSub.Status) bestSub = entry;
-            }
+            if (norm.Contains(other) || other.Contains(norm)) subs.AddRange(entries);
         }
-        if (bestSub is not null) return bestSub;
+        if (subs.Count > 0) return subs.Distinct().ToList();
 
-        // Token-set fallback (≥ 2 tokens of length ≥ 3).
+        // Token-set containment, asymmetric on purpose.
+        //
+        // query ⊆ entry: the library name is the shorter one. A single token is allowed if
+        //   it is distinctive (≥ 4 chars), which is what lets "Anpu" reach Penumbra's
+        //   "Anpu Helm - Ears Only".
+        //
+        // entry ⊆ query: the Penumbra name is the shorter one. Here a single token is NOT
+        //   enough — "aerin" alone would otherwise swallow every library mod that merely
+        //   mentions Aerin, such as "Lashes and Brows for Aerin PACK".
         var queryTokens = PenumbraService.Tokenize(norm);
-        if (queryTokens.Count < 2) return null;
+        if (queryTokens.Count == 0) return Array.Empty<PenumbraEntry>();
 
-        PenumbraEntry? bestTok = null;
+        var querySingleTooShort = queryTokens.Count == 1 && queryTokens.First().Length < 4;
+
+        var toks = new List<PenumbraEntry>();
         foreach (var (tokens, entry) in _byTokens)
         {
-            if (queryTokens.IsSubsetOf(tokens) || tokens.IsSubsetOf(queryTokens))
-                if (bestTok is null || (int)entry.Status > (int)bestTok.Status) bestTok = entry;
+            if (tokens.Count == 0) continue;
+
+            if (!querySingleTooShort && queryTokens.IsSubsetOf(tokens)) { toks.Add(entry); continue; }
+            if (tokens.Count >= 2 && tokens.IsSubsetOf(queryTokens)) toks.Add(entry);
         }
-        return bestTok;
+        return toks.Distinct().ToList();
+    }
+
+    /// <summary>All matches for the folder name, falling back to the display name.</summary>
+    public IReadOnlyList<PenumbraEntry> MatchesFor(string folderName, string? displayName = null)
+    {
+        var hits = LookupAll(folderName);
+        if (hits.Count > 0) return hits;
+        return string.IsNullOrEmpty(displayName)
+            ? Array.Empty<PenumbraEntry>()
+            : LookupAll(displayName!);
     }
 
     public PenumbraStatus StatusFor(string folderName, string? displayName = null)

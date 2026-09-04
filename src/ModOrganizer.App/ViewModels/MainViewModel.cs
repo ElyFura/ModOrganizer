@@ -98,6 +98,14 @@ public sealed partial class MainViewModel : ObservableObject
     public IReadOnlyList<PenumbraFilterMode> PenumbraFilterModes { get; } =
         new[] { PenumbraFilterMode.All, PenumbraFilterMode.Imported, PenumbraFilterMode.Active };
 
+    /// <summary>
+    /// First entry of the collection dropdown, meaning "do not filter". The box used to be
+    /// IsEditable so it could be cleared by deleting the text - but the app's ComboBox
+    /// template has no PART_EditableTextBox, so an editable box rendered its selection as
+    /// blank. Non-editable plus an explicit reset entry fixes both.
+    /// </summary>
+    public const string AllCollectionsOption = "Alle Collections";
+
     public ObservableCollection<string> PenumbraCollectionFilters { get; } = new();
 
     [ObservableProperty] private PenumbraFilterMode _penumbraFilter = PenumbraFilterMode.All;
@@ -883,6 +891,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         var current = PenumbraCollectionFilter;
         PenumbraCollectionFilters.Clear();
+        PenumbraCollectionFilters.Add(AllCollectionsOption);
 
         // Self first, then others, alphabetical inside each user.
         var groups = _penumbraUsers
@@ -898,9 +907,12 @@ public sealed partial class MainViewModel : ObservableObject
             foreach (var c in _penumbra.Collections.OrderBy(c => c.Name))
                 PenumbraCollectionFilters.Add(c.Name);
 
-        // Preserve user's selection if still present.
-        if (!string.IsNullOrEmpty(current) && PenumbraCollectionFilters.Contains(current))
-            PenumbraCollectionFilter = current;
+        // Preserve the selection if it survived the rebuild, otherwise fall back to "all"
+        // rather than leaving a filter applied that no longer has a matching entry.
+        PenumbraCollectionFilter =
+            !string.IsNullOrEmpty(current) && PenumbraCollectionFilters.Contains(current)
+                ? current
+                : AllCollectionsOption;
     }
 
     private static string FormatCollectionFilter(PenumbraUserSnapshot u, string collectionName) =>
@@ -922,18 +934,21 @@ public sealed partial class MainViewModel : ObservableObject
 
         foreach (var u in sources)
         {
-            var entry = u.Snapshot.Lookup(card.FolderName)
-                ?? (string.IsNullOrEmpty(card.DisplayName) ? null : u.Snapshot.Lookup(card.DisplayName!));
-            if (entry is null) continue;
-
-            if ((int)entry.Status > (int)status) status = entry.Status;
-            foreach (var c in entry.ActiveInCollections) active.Add(FormatCollectionFilter(u, c));
-            foreach (var c in entry.AllInCollections)    all.Add(FormatCollectionFilter(u, c));
+            // Every plausible match, not just the best one: the same mod often exists twice
+            // in Penumbra ("… (2)", or a second variant under a hashed folder name) and the
+            // enabled copy is not necessarily the one a single lookup would return.
+            foreach (var entry in u.Snapshot.MatchesFor(card.FolderName, card.DisplayName))
+            {
+                if ((int)entry.Status > (int)status) status = entry.Status;
+                foreach (var c in entry.ActiveInCollections) active.Add(FormatCollectionFilter(u, c));
+                foreach (var c in entry.AllInCollections)    all.Add(FormatCollectionFilter(u, c));
+            }
         }
 
         vm.PenumbraStatus = status;
-        vm.PenumbraActiveInCollections = active;
-        vm.PenumbraAllCollections = all;
+        // Several matches can report the same collection; the filter only needs it once.
+        vm.PenumbraActiveInCollections = active.Distinct().ToList();
+        vm.PenumbraAllCollections = all.Distinct().ToList();
     }
 
     private bool PassesPenumbraFilter(ModCardViewModel vm)
@@ -943,6 +958,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (PenumbraFilter == PenumbraFilterMode.Active && vm.PenumbraStatus != PenumbraStatus.ActiveDefault)
             return false;
         if (!string.IsNullOrEmpty(PenumbraCollectionFilter)
+            && PenumbraCollectionFilter != AllCollectionsOption
             && !vm.PenumbraAllCollections.Contains(PenumbraCollectionFilter))
             return false;
         return true;

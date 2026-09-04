@@ -4,6 +4,7 @@ using ModOrganizer.Core.Duplicates;
 using ModOrganizer.Core.Links;
 using ModOrganizer.Core.Management;
 using ModOrganizer.Core.Models;
+using ModOrganizer.Core.Penumbra;
 
 namespace ModOrganizer.Core.Tests;
 
@@ -239,5 +240,112 @@ public sealed class CategoryFolderTests : IDisposable
     {
         var act = () => CategoryService.TryDeleteEmptyDirectory(Path.Combine(_root, "nope"));
         act.Should().NotThrow();
+    }
+}
+
+/// <summary>
+/// Name matching between a mod library folder and Penumbra's own mod folders.
+/// Pure logic — no filesystem, no database.
+/// </summary>
+public sealed class PenumbraLookupTests
+{
+    private static PenumbraSnapshot Snapshot(params PenumbraEntry[] entries) =>
+        new() { IsAvailable = true, ModDirectory = @"X:\Penumbra", Entries = entries };
+
+    private static PenumbraEntry Entry(string folder, string? meta = null, params string[] activeIn) =>
+        new()
+        {
+            FolderName = folder,
+            MetaName = meta ?? folder,
+            ActiveInCollections = activeIn,
+            AllInCollections = activeIn
+        };
+
+    [Fact]
+    public void SameNormalizedName_ReturnsEveryCopy()
+    {
+        // Real case: two Penumbra copies of one mod, and only the second is enabled in the
+        // collection the user is filtering by. Returning just one made the mod invisible.
+        var snap = Snapshot(
+            Entry("[Nimpy] Sphynx revamped", "[Nimpy] Sphynx revamped", "Default"),
+            Entry("[Nimpy] Sphynx revamped (2)", "[Nimpy] Sphynx revamped", "Fayne"));
+
+        var hits = snap.LookupAll("Sphynx revamped");
+
+        hits.Should().HaveCount(2);
+        hits.SelectMany(h => h.AllInCollections).Should().Contain("Fayne");
+    }
+
+    [Fact]
+    public void DifferentFolderNames_SameMetaName_BothFound()
+    {
+        // The Aerin case: one copy sits under a hashed folder name and is in no collection,
+        // the other carries the real name and is the enabled one.
+        var snap = Snapshot(
+            Entry("dmaiv4h5.jcv", "[vivi] Aerin (Aura-F2)"),
+            Entry("[vivi] Aerin (Miqote F3&103)", "[vivi] Aerin (Miqote F3&103)", "Fayne"));
+
+        var hits = snap.LookupAll("Aerin");
+
+        hits.Should().HaveCount(2);
+        hits.SelectMany(h => h.AllInCollections).Should().Contain("Fayne");
+    }
+
+    [Fact]
+    public void ShortDistinctiveName_MatchesLongerPenumbraName()
+    {
+        var snap = Snapshot(Entry("Anpu Helm - Ears Only", activeIn: "Fayne"));
+
+        snap.LookupAll("Anpu").Should().ContainSingle()
+            .Which.FolderName.Should().Be("Anpu Helm - Ears Only");
+    }
+
+    [Fact]
+    public void ShortName_UnderFourChars_DoesNotMatch()
+    {
+        // "Sun" is too generic to be worth guessing on.
+        var snap = Snapshot(Entry("Sun Tribe Skin", activeIn: "Fayne"));
+        snap.LookupAll("Sun").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SingleTokenEntry_DoesNotSwallowLongerLibraryName()
+    {
+        // Regression: allowing entry-tokens ⊆ query-tokens for a one-token entry made
+        // "Aerin" match every library mod that merely mentions Aerin.
+        var snap = Snapshot(Entry("Aerin", activeIn: "Fayne"));
+
+        snap.LookupAll("Lashes and Brows for Aerin PACK").Should().BeEmpty();
+        snap.LookupAll("Mira - Makeup Based on Aerin").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MultiTokenEntry_StillMatchesLongerLibraryName()
+    {
+        // The reverse direction stays available when the Penumbra name is specific enough.
+        var snap = Snapshot(Entry("AVALON REDUX", activeIn: "Fayne"));
+
+        snap.LookupAll("AVALON REDUX Tube Top").Should().ContainSingle();
+    }
+
+    [Fact]
+    public void ExactFolderName_WinsOverFuzzyMatching()
+    {
+        var snap = Snapshot(
+            Entry("Roommates [7]", activeIn: "Fayne"),
+            Entry("Roommates other", activeIn: "Default"));
+
+        snap.LookupAll("Roommates [7]").Should().ContainSingle()
+            .Which.FolderName.Should().Be("Roommates [7]");
+    }
+
+    [Fact]
+    public void StatusPrefersTheActiveCopy()
+    {
+        var snap = Snapshot(
+            Entry("Thing copy", "Thing"),                    // imported only
+            Entry("Thing", "Thing", "Default"));             // active
+
+        snap.Lookup("Thing")!.Status.Should().Be(PenumbraStatus.ActiveDefault);
     }
 }

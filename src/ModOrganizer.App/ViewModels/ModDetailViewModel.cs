@@ -139,16 +139,27 @@ public sealed partial class ModDetailViewModel : ObservableObject
         var status = PenumbraStatus.NotInstalled;
         foreach (var u in users.OrderByDescending(x => x.IsSelf).ThenBy(x => x.DisplayName))
         {
-            var entry = u.Snapshot.Lookup(FolderName)
-                ?? (string.IsNullOrEmpty(DisplayName) ? null : u.Snapshot.Lookup(DisplayName));
-            if (entry is null) continue;
-
-            if ((int)entry.Status > (int)status) status = entry.Status;
             var prefix = u.IsSelf ? "du" : u.DisplayName;
-            foreach (var c in entry.ActiveInCollections)
-                PenumbraActiveInCollections.Add($"{c} ({prefix})");
-            foreach (var c in entry.AllInCollections.Except(entry.ActiveInCollections))
-                PenumbraOtherCollections.Add($"{c} ({prefix})");
+
+            // All matches, mirroring the gallery: a mod can exist twice in Penumbra and
+            // only the second copy may be the enabled one.
+            foreach (var entry in u.Snapshot.MatchesFor(FolderName, DisplayName))
+            {
+                if ((int)entry.Status > (int)status) status = entry.Status;
+
+                foreach (var c in entry.ActiveInCollections)
+                {
+                    var label = $"{c} ({prefix})";
+                    if (!PenumbraActiveInCollections.Contains(label))
+                        PenumbraActiveInCollections.Add(label);
+                }
+                foreach (var c in entry.AllInCollections.Except(entry.ActiveInCollections))
+                {
+                    var label = $"{c} ({prefix})";
+                    if (!PenumbraOtherCollections.Contains(label))
+                        PenumbraOtherCollections.Add(label);
+                }
+            }
         }
         PenumbraStatus = status;
     }

@@ -47,6 +47,13 @@ if (args[0] == "tag")
         : ApplyTag(args[1], args[2], args.Skip(3).ToArray(), remove: false);
 }
 
+if (args[0] == "penumbra")
+{
+    if (args.Length < 2) { Console.Error.WriteLine("penumbra needs a connection string [collection name]"); return 2; }
+    if (args.Length > 3 && args[2] == "--probe") return PenumbraProbe(args.Skip(3).ToArray());
+    return PenumbraReport(args[1], args.Length > 2 ? args[2] : null);
+}
+
 if (args[0] == "untag")
 {
     if (args.Length < 4)
@@ -610,5 +617,96 @@ static int ListTagged(string connectionString, string tagName)
     }
 
     Console.WriteLine($"  visible in gallery: {total}");
+    return 0;
+}
+
+/// <summary>
+/// Explains how the local Penumbra state maps onto the library: which collections exist,
+/// which of their enabled mods the app can even see, and which library folders they
+/// resolve to. Read-only.
+/// </summary>
+static int PenumbraReport(string connectionString, string? collectionFilter)
+{
+    var svc = new ModOrganizer.Core.Penumbra.PenumbraService();
+    var snap = svc.Read();
+
+    Console.WriteLine($"Available     : {snap.IsAvailable}");
+    Console.WriteLine($"ModDirectory  : {snap.ModDirectory}");
+    Console.WriteLine($"Imported mods : {snap.Entries.Count}   (folders with meta.json)");
+    Console.WriteLine();
+
+    Console.WriteLine("== collections ==");
+    foreach (var c in snap.Collections.OrderBy(c => c.Name))
+    {
+        var inCollection = snap.Entries.Count(e => e.AllInCollections.Contains(c.Name));
+        Console.WriteLine($"  {(c.IsActive ? "[active]" : "[      ]")} {c.Name,-34} role='{c.Role}'  visible mods: {inCollection}");
+    }
+    Console.WriteLine();
+
+    if (collectionFilter is null) return 0;
+
+    var target = snap.Collections.FirstOrDefault(c =>
+        string.Equals(c.Name, collectionFilter, StringComparison.OrdinalIgnoreCase));
+    if (target is null) { Console.WriteLine($"no collection named '{collectionFilter}'"); return 1; }
+
+    Console.WriteLine($"== '{target.Name}' ==");
+    var members = snap.Entries
+        .Where(e => e.AllInCollections.Contains(target.Name))
+        .OrderBy(e => e.FolderName)
+        .ToList();
+    Console.WriteLine($"Penumbra entries in this collection: {members.Count}");
+    foreach (var m in members)
+        Console.WriteLine($"  '{m.FolderName}'  meta='{m.MetaName}'  status={m.Status}");
+    Console.WriteLine();
+
+    // Now the other direction: which library mods does the app resolve into this collection?
+    var store = new DatabaseStore(new PostgresConnectionFactory(connectionString));
+    var library = new ModLibraryService(store);
+
+    Console.WriteLine("== library mods the app maps into this collection ==");
+    var matchedEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var total = 0;
+    foreach (var root in library.GetRoots())
+    {
+        foreach (var card in library.GetMods(root.Id))
+        {
+            // MatchesFor, exactly like the gallery does - a mod can have several copies
+            // in Penumbra and only one of them may be the enabled one.
+            var hits = snap.MatchesFor(card.FolderName, card.DisplayName)
+                .Where(e => e.AllInCollections.Contains(target.Name))
+                .ToList();
+            if (hits.Count == 0) continue;
+
+            Console.WriteLine($"  {card.CategoryName}/{card.FolderName}  ->  " +
+                              string.Join(", ", hits.Select(h => "'" + h.FolderName + "'")));
+            foreach (var h in hits) matchedEntries.Add(h.FolderName);
+            total++;
+        }
+    }
+    Console.WriteLine($"  total: {total}");
+    Console.WriteLine();
+
+    Console.WriteLine("== Penumbra entries with NO library match ==");
+    foreach (var m in members.Where(m => !matchedEntries.Contains(m.FolderName)))
+        Console.WriteLine($"  '{m.FolderName}'  (normalized: '{ModOrganizer.Core.Penumbra.PenumbraService.Normalize(m.FolderName)}')");
+
+    return 0;
+}
+
+/// <summary>Shows exactly how one name normalizes and what the matcher resolves it to.</summary>
+static int PenumbraProbe(string[] names)
+{
+    var snap = new ModOrganizer.Core.Penumbra.PenumbraService().Read();
+    foreach (var name in names)
+    {
+        var norm = ModOrganizer.Core.Penumbra.PenumbraService.Normalize(name);
+        var hit = snap.Lookup(name);
+        Console.WriteLine($"'{name}'");
+        Console.WriteLine($"   normalized : '{norm}' (len {norm.Length})");
+        Console.WriteLine($"   lookup     : {(hit is null ? "<no match>" : "'" + hit.FolderName + "' status=" + hit.Status)}");
+        if (hit is not null)
+            Console.WriteLine($"   collections: {string.Join(", ", hit.AllInCollections)}");
+        Console.WriteLine();
+    }
     return 0;
 }
