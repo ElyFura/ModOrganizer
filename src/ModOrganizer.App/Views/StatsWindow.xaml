@@ -1,0 +1,152 @@
+<Window x:Class="ModOrganizer.App.Views.StatsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Library Stats" Height="720" Width="1080"
+        Background="{DynamicResource Bg0}" Foreground="{DynamicResource Text}"
+        FontFamily="Segoe UI Variable, Segoe UI" FontSize="13"
+        TextOptions.TextFormattingMode="Ideal" TextOptions.TextRenderingMode="ClearType">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="{DynamicResource Bg1}" Padding="24,18"
+                BorderBrush="{DynamicResource Border1}" BorderThickness="0,0,0,1">
+            <StackPanel>
+                <TextBlock Text="Library stats" Style="{DynamicResource H1}" />
+                <TextBlock x:Name="SubtitleText" Style="{DynamicResource Caption}" Margin="0,3,0,0" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="24,18">
+
+                <!-- Summary tiles -->
+                <UniformGrid Columns="4" Rows="1">
+                    <Border Background="{DynamicResource Bg2}" BorderBrush="{DynamicResource Border1}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock Text="MODS" Style="{DynamicResource Label}" />
+                            <TextBlock x:Name="StatMods" FontSize="28" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{DynamicResource Bg2}" BorderBrush="{DynamicResource Border1}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="4,0">
+                        <StackPanel>
+                            <TextBlock Text="FILES" Style="{DynamicResource Label}" />
+                            <TextBlock x:Name="StatFiles" FontSize="28" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{DynamicResource Bg2}" BorderBrush="{DynamicResource Border1}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="4,0">
+                        <StackPanel>
+                            <TextBlock Text="TOTAL SIZE" Style="{DynamicResource Label}" />
+                            <TextBlock x:Name="StatSize" FontSize="28" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{DynamicResource Bg2}" BorderBrush="{DynamicResource Border1}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="8,0,0,0">
+                        <StackPanel>
+                            <TextBlock Text="AVG RATING" Style="{DynamicResource Label}" />
+                            <TextBlock x:Name="StatRating" FontSize="28" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                </UniformGrid>
+
+                <!-- By Category -->
+                <TextBlock Text="MODS BY CATEGORY" Style="{DynamicResource Label}" Margin="0,24,0,8" />
+                <Border Background="{DynamicResource Bg2}" BorderBrush="{DynamicResource Border1}" BorderThickness="1" CornerRadius="8" Padding="16">
+                    <ItemsControl x:Name="CategoriesList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="80" />
+                                        <ColumnDefinition Width="80" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                    <Border Grid.Column="1" Background="#2F3040" CornerRadius="4" Height="10" VerticalAlignment="Center">
+                                        <Border Background="{DynamicResource Accent}" CornerRadius="4" HorizontalAlignment="Left" Width="{Binding BarWidth}" />
+                                    </Border>
+                                    <TextBlock Grid.Column="2" Text="{Binding CountText}" HorizontalAlignment="Right" Foreground="{DynamicResource TextDim}" />
+                                    <TextBlock Grid.Column="3" Text="{Binding SizeText}" HorizontalAlignment="Right" Foreground="{DynamicResource TextDim}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Border>
+
+                <!-- Top by size -->
+                <TextBlock Text="TOP 10 BIGGEST MODS" Style="{DynamicResource Label}" Margin="0,24,0,8" />
+                <Border Background="{DynamicResource Bg2}" BorderBrush="{DynamicResource Border1}" BorderThickness="1" CornerRadius="8" Padding="16">
+                    <ItemsControl x:Name="TopSizeList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="120" />
+                                        <ColumnDefinition Width="120" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding FolderName}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="1" Text="{Binding CategoryName}" Foreground="{DynamicResource TextDim}" />
+                                    <TextBlock Grid.Column="2" Text="{Binding SizeText}" HorizontalAlignment="Right" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Border>
+
+                <Grid Margin="0,24,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                        <TextBlock Text="ADDED PER MONTH" Style="{DynamicResource Label}" Margin="0,0,0,8" />
+                        <Border Background="{DynamicResource Bg2}" BorderBrush="{DynamicResource Border1}" BorderThickness="1" CornerRadius="8" Padding="16" MinHeight="160">
+                            <ItemsControl x:Name="MonthsList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,2">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="70" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="50" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="{Binding Month}" />
+                                            <Border Grid.Column="1" Background="#2F3040" CornerRadius="3" Height="8" VerticalAlignment="Center">
+                                                <Border Background="{DynamicResource AccentHover}" CornerRadius="3" HorizontalAlignment="Left" Width="{Binding BarWidth}" />
+                                            </Border>
+                                            <TextBlock Grid.Column="2" Text="{Binding Count}" HorizontalAlignment="Right" Foreground="{DynamicResource TextDim}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                        <TextBlock Text="TOP TAGS" Style="{DynamicResource Label}" Margin="0,0,0,8" />
+                        <Border Background="{DynamicResource Bg2}" BorderBrush="{DynamicResource Border1}" BorderThickness="1" CornerRadius="8" Padding="16" MinHeight="160">
+                            <ItemsControl x:Name="TagsList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,2">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="50" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="{Binding TagName}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Count}" HorizontalAlignment="Right" Foreground="{DynamicResource TextDim}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>

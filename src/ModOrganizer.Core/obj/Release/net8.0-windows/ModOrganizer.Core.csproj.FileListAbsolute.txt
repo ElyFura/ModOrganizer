@@ -1,0 +1,10 @@
+F:\ModOrganizer\src\ModOrganizer.Core\bin\Release\net8.0-windows\ModOrganizer.Core.deps.json
+F:\ModOrganizer\src\ModOrganizer.Core\bin\Release\net8.0-windows\ModOrganizer.Core.dll
+F:\ModOrganizer\src\ModOrganizer.Core\obj\Release\net8.0-windows\ModOrganizer.Core.csproj.AssemblyReference.cache
+F:\ModOrganizer\src\ModOrganizer.Core\obj\Release\net8.0-windows\ModOrganizer.Core.GeneratedMSBuildEditorConfig.editorconfig
+F:\ModOrganizer\src\ModOrganizer.Core\obj\Release\net8.0-windows\ModOrganizer.Core.AssemblyInfoInputs.cache
+F:\ModOrganizer\src\ModOrganizer.Core\obj\Release\net8.0-windows\ModOrganizer.Core.AssemblyInfo.cs
+F:\ModOrganizer\src\ModOrganizer.Core\obj\Release\net8.0-windows\ModOrganizer.Core.csproj.CoreCompileInputs.cache
+F:\ModOrganizer\src\ModOrganizer.Core\obj\Release\net8.0-windows\ModOrganizer.Core.dll
+F:\ModOrganizer\src\ModOrganizer.Core\obj\Release\net8.0-windows\refint\ModOrganizer.Core.dll
+F:\ModOrganizer\src\ModOrganizer.Core\obj\Release\net8.0-windows\ref\ModOrganizer.Core.dll

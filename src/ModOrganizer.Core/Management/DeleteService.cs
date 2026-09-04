@@ -1,0 +1,83 @@
+using Dapper;
+using ModOrganizer.Core.Archive;
+using ModOrganizer.Core.Models;
+using ModOrganizer.Core.Storage;
+
+namespace ModOrganizer.Core.Management;
+
+public sealed class DeleteService
+{
+    private readonly DatabaseStore _store;
+    private readonly ArchiveService _archive;
+    private readonly FileSystemActivityGate? _gate;
+
+    public DeleteService(DatabaseStore store, ArchiveService archive, FileSystemActivityGate? gate = null)
+    {
+        _store = store;
+        _archive = archive;
+        _gate = gate;
+    }
+
+    public bool DeleteMod(long modId, bool archiveBeforeDelete = false)
+    {
+        using var _suppress = _gate?.Suppress();
+        using var conn = _store.Open();
+        var row = conn.QuerySingle<(string FolderName, string CatName, string RootPath)>(
+            """
+            SELECT m.folder_name AS FolderName, c.name AS CatName, r.path AS RootPath
+            FROM mods m JOIN categories c ON c.id=m.category_id
+                        JOIN roots r ON r.id=c.root_id
+            WHERE m.id=@m
+            """, new { m = modId });
+
+        var folderPath = Path.Combine(row.RootPath, row.CatName, row.FolderName);
+
+        if (archiveBeforeDelete && Directory.Exists(folderPath))
+        {
+            try { _archive.ArchiveFolder(folderPath); }
+            catch { return false; }
+        }
+
+        bool recycled = true;
+        if (Directory.Exists(folderPath))
+            recycled = RecycleBin.SendToRecycleBin(folderPath);
+
+        if (!recycled) return false;
+
+        using var tx = conn.BeginTransaction();
+        conn.Execute(
+            "UPDATE mods SET deleted_at=@t, is_missing=FALSE WHERE id=@m",
+            new { t = DateTimeOffset.UtcNow.ToString("o"), m = modId }, tx);
+
+        ActionLog.Record(conn, tx, ActionKind.Delete,
+            Guid.NewGuid().ToString("N"), modId: modId, fromPath: folderPath);
+        tx.Commit();
+        return true;
+    }
+
+    public bool DeleteCategory(long categoryId)
+    {
+        using var _suppress = _gate?.Suppress();
+        using var conn = _store.Open();
+        var row = conn.QuerySingle<(string Name, string RootPath)>(
+            """
+            SELECT c.name AS Name, r.path AS RootPath
+            FROM categories c JOIN roots r ON r.id=c.root_id WHERE c.id=@id
+            """, new { id = categoryId });
+
+        var folderPath = Path.Combine(row.RootPath, row.Name);
+        bool recycled = true;
+        if (Directory.Exists(folderPath))
+            recycled = RecycleBin.SendToRecycleBin(folderPath);
+
+        if (!recycled) return false;
+
+        using var tx = conn.BeginTransaction();
+        conn.Execute("DELETE FROM mods WHERE category_id=@c", new { c = categoryId }, tx);
+        conn.Execute("DELETE FROM categories WHERE id=@c", new { c = categoryId }, tx);
+        ActionLog.Record(conn, tx, ActionKind.CategoryDelete,
+            Guid.NewGuid().ToString("N"), fromPath: folderPath);
+        tx.Commit();
+        return true;
+    }
+}

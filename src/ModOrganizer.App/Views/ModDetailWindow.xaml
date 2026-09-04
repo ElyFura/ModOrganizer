@@ -1,0 +1,459 @@
+<Window x:Class="ModOrganizer.App.Views.ModDetailWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:ModOrganizer.App.ViewModels"
+        xmlns:md="clr-namespace:Markdig.Wpf;assembly=Markdig.Wpf"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Mod Detail" Height="780" Width="1180"
+        Background="{DynamicResource Bg0}" Foreground="{DynamicResource Text}"
+        FontFamily="Segoe UI Variable, Segoe UI" FontSize="13"
+        d:DataContext="{d:DesignInstance Type=vm:ModDetailViewModel}"
+        TextOptions.TextFormattingMode="Ideal" TextOptions.TextRenderingMode="ClearType">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="{StaticResource Bg1}" Padding="24,18"
+                BorderBrush="{StaticResource Border1}" BorderThickness="0,0,0,1">
+            <DockPanel LastChildFill="False">
+                <StackPanel DockPanel.Dock="Left">
+                    <TextBlock Text="{Binding DisplayName}" Style="{StaticResource H1}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                        <Border Background="{StaticResource Bg3}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
+                            <TextBlock Text="{Binding CategoryName}" Foreground="{StaticResource TextDim}" FontSize="11" />
+                        </Border>
+                        <TextBlock Text="{Binding FolderName}" Foreground="{StaticResource TextDim}" FontSize="12" VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <!-- Penumbra section: status + collections -->
+                    <StackPanel Margin="0,10,0,0"
+                                Visibility="{Binding PenumbraVisible, Converter={StaticResource BoolToVisible}}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Penumbra:" Foreground="{StaticResource TextDim}" FontSize="11"
+                                       VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <Border CornerRadius="4" Padding="6,1" Background="#26A69A">
+                                <TextBlock Text="{Binding PenumbraStatusText}" Foreground="White"
+                                           FontSize="11" FontWeight="SemiBold" />
+                            </Border>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0"
+                                    Visibility="{Binding PenumbraActiveInCollections.Count, Converter={StaticResource BoolToVisible}}">
+                            <TextBlock Text="aktiv in: " Foreground="{StaticResource TextDim}" FontSize="11" />
+                            <ItemsControl ItemsSource="{Binding PenumbraActiveInCollections}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border CornerRadius="3" Padding="5,1" Background="#7A5CFA" Margin="0,0,4,0">
+                                            <TextBlock Text="{Binding}" Foreground="White" FontSize="10" />
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0"
+                                    Visibility="{Binding PenumbraOtherCollections.Count, Converter={StaticResource BoolToVisible}}">
+                            <TextBlock Text="auch in: " Foreground="{StaticResource TextDim}" FontSize="11" />
+                            <ItemsControl ItemsSource="{Binding PenumbraOtherCollections}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border CornerRadius="3" Padding="5,1" Background="#3a3a45" Margin="0,0,4,0">
+                                            <TextBlock Text="{Binding}" Foreground="{StaticResource TextDim}" FontSize="10" />
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button Command="{Binding SetRatingCommand}" CommandParameter="1" Background="Transparent" BorderBrush="Transparent" Padding="0" Margin="0,0,2,0">
+                            <TextBlock Text="★" FontSize="20">
+                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="#515263" /><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource Ge}, ConverterParameter=1}" Value="True"><Setter Property="Foreground" Value="#FFD166" /></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                            </TextBlock>
+                        </Button>
+                        <Button Command="{Binding SetRatingCommand}" CommandParameter="2" Background="Transparent" BorderBrush="Transparent" Padding="0" Margin="0,0,2,0">
+                            <TextBlock Text="★" FontSize="20">
+                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="#515263" /><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource Ge}, ConverterParameter=2}" Value="True"><Setter Property="Foreground" Value="#FFD166" /></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                            </TextBlock>
+                        </Button>
+                        <Button Command="{Binding SetRatingCommand}" CommandParameter="3" Background="Transparent" BorderBrush="Transparent" Padding="0" Margin="0,0,2,0">
+                            <TextBlock Text="★" FontSize="20">
+                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="#515263" /><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource Ge}, ConverterParameter=3}" Value="True"><Setter Property="Foreground" Value="#FFD166" /></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                            </TextBlock>
+                        </Button>
+                        <Button Command="{Binding SetRatingCommand}" CommandParameter="4" Background="Transparent" BorderBrush="Transparent" Padding="0" Margin="0,0,2,0">
+                            <TextBlock Text="★" FontSize="20">
+                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="#515263" /><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource Ge}, ConverterParameter=4}" Value="True"><Setter Property="Foreground" Value="#FFD166" /></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                            </TextBlock>
+                        </Button>
+                        <Button Command="{Binding SetRatingCommand}" CommandParameter="5" Background="Transparent" BorderBrush="Transparent" Padding="0">
+                            <TextBlock Text="★" FontSize="20">
+                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="#515263" /><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource Ge}, ConverterParameter=5}" Value="True"><Setter Property="Foreground" Value="#FFD166" /></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                            </TextBlock>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="Open in Explorer" Command="{Binding OpenInExplorerCommand}" Margin="0,0,8,0" />
+                    <Button Content="Delete" Command="{Binding DeleteModCommand}" Style="{StaticResource DangerButton}" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <TabControl Grid.Row="1" Padding="0">
+            <TabItem Header="Übersicht">
+                <Grid Margin="24,18,24,18">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="320" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Background="#0A0A10" CornerRadius="8" ClipToBounds="True"
+                            Cursor="Hand" MouseLeftButtonUp="Image_Click">
+                        <Image Source="{Binding PrimaryImageLarge}" Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                    </Border>
+
+                    <ScrollViewer Grid.Column="1" Margin="20,0,0,0" VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="RENAME" Style="{StaticResource Label}" />
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="Apply"
+                                        Command="{Binding RenameModCommand}"
+                                        Style="{StaticResource PrimaryButton}" Margin="6,0,0,0" />
+                                <TextBox Text="{Binding NewFolderName, UpdateSourceTrigger=PropertyChanged}" />
+                            </DockPanel>
+
+                            <TextBlock Text="IMAGES IN THIS MOD" Style="{StaticResource Label}" Margin="0,22,0,6" />
+                            <ItemsControl ItemsSource="{Binding ImagePaths}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{StaticResource Bg2}" BorderBrush="{StaticResource Border1}"
+                                                BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,2">
+                                            <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis"
+                                                       FontSize="11" Foreground="{StaticResource TextDim}" />
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="FILE COUNTS" Style="{StaticResource Label}" Margin="0,22,0,6" />
+                            <StackPanel Orientation="Horizontal">
+                                <Border Background="{StaticResource Bg3}" CornerRadius="4" Padding="10,6" Margin="0,0,6,0">
+                                    <StackPanel>
+                                        <TextBlock Text="IMAGES" FontSize="9" Foreground="{StaticResource TextDim}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding ImagePaths.Count}" FontSize="16" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="{StaticResource Bg3}" CornerRadius="4" Padding="10,6" Margin="0,0,6,0">
+                                    <StackPanel>
+                                        <TextBlock Text="FILES" FontSize="9" Foreground="{StaticResource TextDim}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Files.Count}" FontSize="16" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="{StaticResource Bg3}" CornerRadius="4" Padding="10,6">
+                                    <StackPanel>
+                                        <TextBlock Text="TAGS" FontSize="9" Foreground="{StaticResource TextDim}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Tags.Count}" FontSize="16" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Anleitung">
+                <Grid Margin="24,18,24,18">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.ColumnSpan="2" Grid.Row="0" Style="{StaticResource Label}" Text="MARKDOWN · LIVE PREVIEW" />
+
+                    <TextBox Grid.Column="0" Grid.Row="1"
+                             Text="{Binding CommentMarkdown, UpdateSourceTrigger=PropertyChanged}"
+                             AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                             FontFamily="Cascadia Code, Consolas" FontSize="12" />
+
+                    <Border Grid.Column="1" Grid.Row="1" Margin="12,0,0,0"
+                            Background="{StaticResource Bg2}" BorderBrush="{StaticResource Border1}" BorderThickness="1"
+                            CornerRadius="6" Padding="16">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <md:MarkdownViewer Markdown="{Binding CommentMarkdown}" />
+                        </ScrollViewer>
+                    </Border>
+
+                    <Button Grid.ColumnSpan="2" Grid.Row="2"
+                            Content="Save comment" Command="{Binding SaveCommentCommand}"
+                            Style="{StaticResource PrimaryButton}"
+                            HorizontalAlignment="Right" Margin="0,12,0,0" />
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Tags">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="24,18,24,24">
+                        <TextBlock Text="ADD TAG" Style="{StaticResource Label}" />
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="Add" Command="{Binding AddTagCommand}"
+                                    Style="{StaticResource PrimaryButton}" Margin="6,0,0,0" />
+                            <TextBox Text="{Binding NewTagName, UpdateSourceTrigger=PropertyChanged}" />
+                        </DockPanel>
+
+                        <TextBlock Text="ASSIGNED" Style="{StaticResource Label}" Margin="0,22,0,6" />
+                        <ItemsControl ItemsSource="{Binding Tags}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{StaticResource Accent}" CornerRadius="12" Padding="10,4" Margin="0,0,6,6">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Name}" Foreground="White" FontSize="12" FontWeight="Medium" />
+                                            <Button Content="×" Margin="8,0,0,0" Padding="0" MinWidth="18" FontSize="13"
+                                                    Background="Transparent" BorderBrush="Transparent" Foreground="White"
+                                                    Command="{Binding DataContext.RemoveTagCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock Text="ALL TAGS · CLICK TO ATTACH" Style="{StaticResource Label}" Margin="0,22,0,6" />
+                        <ItemsControl ItemsSource="{Binding AllTags}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Margin="0,0,6,6" Padding="10,4" FontSize="12"
+                                            Command="{Binding DataContext.AttachExistingTagCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}">
+                                        <TextBlock Text="{Binding Name}" />
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Links">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="24,18,24,24">
+                        <TextBlock Text="ADD LINK" Style="{StaticResource Label}" />
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="Add" Command="{Binding AddLinkCommand}"
+                                    Style="{StaticResource PrimaryButton}" Margin="6,0,0,0" />
+                            <TextBox Text="{Binding NewLinkUrl, UpdateSourceTrigger=PropertyChanged}" />
+                        </DockPanel>
+
+                        <TextBlock Text="SUGGESTED FROM ARCHIVE IMAGES" Style="{StaticResource Label}" Margin="0,22,0,6"
+                                   Visibility="{Binding LinkSuggestions.Count, Converter={StaticResource BoolToVisible}}" />
+                        <ItemsControl ItemsSource="{Binding LinkSuggestions}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{StaticResource Bg2}" BorderBrush="{StaticResource Border1}"
+                                            BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,0,6">
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Content="Add"
+                                                    Command="{Binding DataContext.AddSuggestedLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}" Padding="10,3" Margin="8,0,0,0" />
+                                            <TextBlock Text="{Binding}" FontSize="12" VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock Text="YOUR LINKS" Style="{StaticResource Label}" Margin="0,22,0,6" />
+                        <ItemsControl ItemsSource="{Binding Links}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{StaticResource Bg2}" BorderBrush="{StaticResource Border1}"
+                                            BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,0,0,6">
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Button Content="Open" Padding="10,4"
+                                                        Command="{Binding DataContext.OpenLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}" Margin="0,0,4,0" />
+                                                <Button Content="×" Padding="8,4"
+                                                        Command="{Binding DataContext.RemoveLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}" />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Url}" FontSize="12" TextTrimming="CharacterEllipsis" />
+                                                <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                                    <Border Background="{StaticResource Bg3}" CornerRadius="3" Padding="5,1" Margin="0,0,6,0">
+                                                        <TextBlock Text="{Binding Domain}" FontSize="10" Foreground="{StaticResource TextDim}" />
+                                                    </Border>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Diskussion">
+                <Grid Margin="24,18,24,18" DataContext="{Binding Thread}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Comments}" Padding="0,0,8,8">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{StaticResource Bg2}" BorderBrush="{StaticResource Border1}"
+                                            BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,8">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="32" Height="32" CornerRadius="16"
+                                                    Background="{Binding AuthorBrush}" VerticalAlignment="Top" Margin="0,0,12,0">
+                                                <TextBlock Text="{Binding Initials, Mode=OneWay}" Foreground="White"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                           FontSize="11" FontWeight="SemiBold" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding AuthorName, Mode=OneWay}"
+                                                               FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding TimeText, Mode=OneWay}"
+                                                               Style="{StaticResource Caption}"
+                                                               Margin="8,0,0,0" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding BodyMd, Mode=OneWay}"
+                                                           TextWrapping="Wrap" Margin="0,4,0,0"
+                                                           Foreground="{StaticResource Text}" />
+                                            </StackPanel>
+                                            <Button Grid.Column="2" Content="×" Padding="6,2"
+                                                    Visibility="{Binding IsMine, Converter={StaticResource BoolToVisible}}"
+                                                    Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Background="Transparent" BorderBrush="Transparent"
+                                                    Foreground="{StaticResource TextDim}"
+                                                    VerticalAlignment="Top" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <Border Grid.Row="1" Background="{StaticResource Bg1}" BorderBrush="{StaticResource Border1}"
+                            BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,8,0,0">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="Posten" Command="{Binding PostCommand}"
+                                    Style="{StaticResource PrimaryButton}" Margin="8,0,0,0"
+                                    IsDefault="True" />
+                            <TextBox Text="{Binding NewCommentText, UpdateSourceTrigger=PropertyChanged}"
+                                     AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60"
+                                     VerticalScrollBarVisibility="Auto" />
+                        </DockPanel>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Dateien">
+                <Border Margin="24,18,24,18">
+                    <DataGrid ItemsSource="{Binding Files}" AutoGenerateColumns="False" IsReadOnly="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Path" Binding="{Binding RelativePath}" Width="*" />
+                            <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="80" />
+                            <DataGridTextColumn Header="Size" Binding="{Binding SizeBytes}" Width="120" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+            </TabItem>
+
+            <TabItem Header="PMP">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding PmpDetails}" Margin="24,18,24,24">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{StaticResource Bg2}" BorderBrush="{StaticResource Border1}" BorderThickness="1"
+                                        CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding FilePath}" Style="{StaticResource Caption}" />
+                                        <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                            <Border Background="{StaticResource Bg3}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
+                                                <TextBlock Foreground="{StaticResource TextDim}" FontSize="11">
+                                                    <Run Text="Autor: " />
+                                                    <Run Text="{Binding Author, Mode=OneWay, FallbackValue=—}" Foreground="{StaticResource Text}" />
+                                                </TextBlock>
+                                            </Border>
+                                            <Border Background="{StaticResource Bg3}" CornerRadius="4" Padding="6,2" Margin="0,0,6,0">
+                                                <TextBlock Foreground="{StaticResource TextDim}" FontSize="11">
+                                                    <Run Text="Version: " />
+                                                    <Run Text="{Binding Version, Mode=OneWay, FallbackValue=—}" Foreground="{StaticResource Text}" />
+                                                </TextBlock>
+                                            </Border>
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,10,0,0"
+                                                   Foreground="{StaticResource TextDim}" />
+
+                                        <TextBlock Text="GROUPS / OPTIONS" Style="{StaticResource Label}" Margin="0,16,0,4" />
+                                        <ItemsControl ItemsSource="{Binding Groups}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="{StaticResource Bg3}" CornerRadius="4" Padding="8,3" Margin="0,0,6,4">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding Name}" FontSize="12" />
+                                                            <TextBlock Text=" · " Foreground="{StaticResource TextDim}" />
+                                                            <TextBlock Text="{Binding Type, FallbackValue=Single}" FontSize="11" Foreground="{StaticResource TextDim}" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <TextBlock Text="GAME PATHS BETROFFEN" Style="{StaticResource Label}" Margin="0,16,0,4" />
+                                        <ItemsControl ItemsSource="{Binding GamePaths}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding}" FontFamily="Cascadia Code, Consolas" FontSize="11"
+                                                               Foreground="{StaticResource TextDim}" Margin="0,1" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</Window>

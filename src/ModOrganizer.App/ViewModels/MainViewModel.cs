@@ -1,0 +1,1208 @@
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Windows;
+using System.Windows.Threading;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using ModOrganizer.App.Services;
+using ModOrganizer.App.Views;
+using ModOrganizer.Core.Auth;
+using ModOrganizer.Core.Collections;
+using ModOrganizer.Core.Duplicates;
+using ModOrganizer.Core.Health;
+using ModOrganizer.Core.Management;
+using ModOrganizer.Core.Penumbra;
+using ModOrganizer.Core.Queries;
+using ModOrganizer.Core.Scanning;
+using ModOrganizer.Core.Tagging;
+
+namespace ModOrganizer.App.ViewModels;
+
+public sealed partial class MainViewModel : ObservableObject
+{
+    private readonly ModLibraryService _library;
+    private readonly TagService _tagSvc;
+    private readonly ThumbnailCache _thumbnails;
+    private readonly ModScanner _scanner;
+    private readonly ModDetailViewModelFactory _detailFactory;
+    private readonly MoveService _moveSvc;
+    private readonly HealthChecker _health;
+    private readonly DuplicateFinder _dupes;
+    private readonly IServiceProvider _sp;
+    private readonly ILogger<MainViewModel> _log;
+
+    public ObservableCollection<RootInfo> Roots { get; } = new();
+    public ObservableCollection<CategoryItemViewModel> Categories { get; } = new();
+    public ObservableCollection<ModCardViewModel> Mods { get; } = new();
+    public ObservableCollection<FolderNodeViewModel> FolderTree { get; } = new();
+    public ObservableCollection<SmartCollection> SmartCollections { get; } = new();
+
+    // ---- tag filter ----
+    public ObservableCollection<TagFilterViewModel> TagFilters { get; } = new();
+
+    /// <summary>All tags, for the bulk-tag context menu.</summary>
+    public ObservableCollection<TagInfo> AllTags { get; } = new();
+
+    public IReadOnlyList<TagFilterMode> TagFilterModes { get; } =
+        new[] { TagFilterMode.And, TagFilterMode.Or };
+
+    [ObservableProperty] private TagFilterMode _tagMode = TagFilterMode.And;
+    [ObservableProperty] private bool _onlyUntagged;
+
+    /// <summary>
+    /// Set while several filter properties are being reset together, so the gallery
+    /// reloads once at the end instead of once per property.
+    /// </summary>
+    private bool _suppressFilterRefresh;
+
+    partial void OnTagModeChanged(TagFilterMode value)
+    {
+        if (!_suppressFilterRefresh) RefreshMods();
+    }
+
+    partial void OnOnlyUntaggedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(TagFilterSummary));
+        OnPropertyChanged(nameof(HasTagFilter));
+        if (!_suppressFilterRefresh) RefreshMods();
+    }
+
+    /// <summary>Human-readable summary of the active tag filter, for the toolbar.</summary>
+    public string TagFilterSummary
+    {
+        get
+        {
+            var include = TagFilters.Where(t => t.State == TagFilterState.Include).Select(t => t.Name).ToList();
+            var exclude = TagFilters.Where(t => t.State == TagFilterState.Exclude).Select(t => t.Name).ToList();
+
+            var parts = new List<string>();
+            if (include.Count > 0)
+                parts.Add(string.Join(TagMode == TagFilterMode.And ? " UND " : " ODER ", include));
+            if (exclude.Count > 0)
+                parts.Add("ohne " + string.Join(", ", exclude));
+            if (OnlyUntagged) parts.Add("ohne Tags");
+
+            return parts.Count == 0 ? "" : string.Join(" · ", parts);
+        }
+    }
+
+    public bool HasTagFilter =>
+        OnlyUntagged || TagFilters.Any(t => t.State != TagFilterState.Off);
+
+    private PenumbraSnapshot _penumbra = new();
+    private IReadOnlyList<PenumbraUserSnapshot> _penumbraUsers = Array.Empty<PenumbraUserSnapshot>();
+    public bool PenumbraAvailable => _penumbra.IsAvailable || _penumbraUsers.Count > 0;
+
+    public IReadOnlyList<PenumbraFilterMode> PenumbraFilterModes { get; } =
+        new[] { PenumbraFilterMode.All, PenumbraFilterMode.Imported, PenumbraFilterMode.Active };
+
+    public ObservableCollection<string> PenumbraCollectionFilters { get; } = new();
+
+    [ObservableProperty] private PenumbraFilterMode _penumbraFilter = PenumbraFilterMode.All;
+    [ObservableProperty] private string? _penumbraCollectionFilter;
+
+    partial void OnPenumbraFilterChanged(PenumbraFilterMode value) => RefreshMods();
+    partial void OnPenumbraCollectionFilterChanged(string? value) => RefreshMods();
+
+    public ToastHost? Toasts { get; set; }
+    public PresenceService? Presence { get; set; }
+    public ObservableCollection<PresenceChipViewModel> OnlineUsers { get; } = new();
+
+    public void RefreshPresence()
+    {
+        if (Presence is null) return;
+        OnlineUsers.Clear();
+        foreach (var p in Presence.OnlineUsers.Values)
+            OnlineUsers.Add(new PresenceChipViewModel(p));
+    }
+
+    public IReadOnlyList<SortOption> SortOptions { get; } = new SortOption[]
+    {
+        new(ModSort.CategoryThenName, "Kategorie · Name"),
+        new(ModSort.Name, "Name"),
+        new(ModSort.AddedNewest, "Zuletzt hinzugefügt"),
+        new(ModSort.UpdatedNewest, "Zuletzt geändert"),
+        new(ModSort.LastViewed, "Zuletzt angeschaut"),
+        new(ModSort.SizeDesc, "Größe (groß → klein)"),
+        new(ModSort.RatingDesc, "Rating (hoch → niedrig)")
+    };
+
+    [ObservableProperty] private RootInfo? _selectedRoot;
+    [ObservableProperty] private CategoryItemViewModel? _selectedCategory;
+    [ObservableProperty] private ModCardViewModel? _selectedMod;
+    [ObservableProperty] private string _searchText = "";
+    [ObservableProperty] private string _statusText = "";
+    [ObservableProperty] private bool _isBusy;
+    [ObservableProperty] private int _visibleModCount;
+    [ObservableProperty] private bool _isFolderView;
+    [ObservableProperty] private SortOption _selectedSort;
+    [ObservableProperty] private int _minRating;
+    [ObservableProperty] private int _thumbnailSize = 280;
+
+    // The info area is (ThumbHeight - ThumbImageHeight) tall and now has to fit a tag
+    // chip row as well as name, category, stars and the file-count badges.
+    public int ThumbHeight => (int)(ThumbnailSize * 1.36);
+    public int ThumbImageHeight => (int)(ThumbnailSize * 0.786);
+
+    private AppConfig? _config;
+    public void AttachConfig(AppConfig cfg)
+    {
+        _config = cfg;
+        if (cfg.Ui.ThumbnailSize > 0) ThumbnailSize = cfg.Ui.ThumbnailSize;
+    }
+
+    partial void OnThumbnailSizeChanged(int value)
+    {
+        OnPropertyChanged(nameof(ThumbHeight));
+        OnPropertyChanged(nameof(ThumbImageHeight));
+        if (_config is not null)
+        {
+            _config.Ui.ThumbnailSize = value;
+            try { _config.Save(); } catch { /* config save best-effort */ }
+        }
+    }
+
+    public int SelectedCount => Mods.Count(m => m.IsSelected);
+
+    public MainViewModel(ModLibraryService library, TagService tagSvc, ThumbnailCache thumbnails,
+        ModScanner scanner, ModDetailViewModelFactory detailFactory, MoveService moveSvc,
+        HealthChecker health, DuplicateFinder dupes, IServiceProvider sp, ILogger<MainViewModel> log)
+    {
+        _library = library;
+        _tagSvc = tagSvc;
+        _thumbnails = thumbnails;
+        _scanner = scanner;
+        _detailFactory = detailFactory;
+        _moveSvc = moveSvc;
+        _health = health;
+        _dupes = dupes;
+        _sp = sp;
+        _log = log;
+        _selectedSort = SortOptions[0];
+    }
+
+    /// <summary>Kept for callers that fire and forget; the work happens in <see cref="LoadAsync"/>.</summary>
+    public void Load() => _ = LoadAsync();
+
+    public async Task LoadAsync()
+    {
+        try
+        {
+            var roots = await _library.GetRootsAsync().ConfigureAwait(true);
+
+            var previous = SelectedRoot?.Id;
+            Roots.Clear();
+            foreach (var r in roots) Roots.Add(r);
+
+            // Penumbra reads the local config and the remote snapshots - both off-thread.
+            await ReloadSmartCollectionsAsync().ConfigureAwait(true);
+            await ReloadTagsAsync().ConfigureAwait(true);
+            await ReloadPenumbraAsync().ConfigureAwait(true);
+
+            var restored = previous is null ? null : Roots.FirstOrDefault(r => r.Id == previous.Value);
+            var target = restored ?? (Roots.Count > 0 ? Roots[0] : null);
+
+            if (!ReferenceEquals(target, SelectedRoot))
+                SelectedRoot = target;   // setter kicks off the category + mod reload
+            else
+                await ReloadRootAsync(target).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Load failed");
+            StatusText = "Laden fehlgeschlagen: " + ex.Message;
+        }
+    }
+
+    private async Task ReloadRootAsync(RootInfo? value)
+    {
+        Categories.Clear();
+        SelectedCategory = null;
+
+        if (value is null)
+        {
+            await RefreshModsAsync().ConfigureAwait(true);
+            return;
+        }
+
+        var categories = await _library.GetCategoriesAsync(value.Id).ConfigureAwait(true);
+        foreach (var c in categories) Categories.Add(new CategoryItemViewModel(c));
+
+        await RefreshModsAsync().ConfigureAwait(true);
+    }
+
+    partial void OnSelectedRootChanged(RootInfo? value) => _ = ReloadRootAsync(value);
+
+    // All of these honour _suppressFilterRefresh so applying a smart collection, which
+    // sets several of them at once, reloads the gallery once instead of four times.
+    partial void OnSelectedCategoryChanged(CategoryItemViewModel? value)
+    {
+        if (!_suppressFilterRefresh) RefreshMods();
+    }
+
+    partial void OnSelectedSortChanged(SortOption value)
+    {
+        if (!_suppressFilterRefresh) RefreshMods();
+    }
+
+    partial void OnMinRatingChanged(int value)
+    {
+        if (!_suppressFilterRefresh) RefreshMods();
+    }
+
+    // ---- search debounce ----
+    //
+    // Every keystroke used to run the full gallery query plus a rebuild of every card.
+    // Wait until typing settles before touching the database.
+    private DispatcherTimer? _searchDebounce;
+
+    partial void OnSearchTextChanged(string value)
+    {
+        if (_suppressFilterRefresh) return;
+        _searchDebounce ??= CreateSearchDebounce();
+        _searchDebounce.Stop();
+        _searchDebounce.Start();
+    }
+
+    private DispatcherTimer CreateSearchDebounce()
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            RefreshMods();
+        };
+        return timer;
+    }
+
+    public void RefreshMods() => _ = RefreshModsAsync();
+
+    /// <summary>Cancels an in-flight refresh when a newer one supersedes it.</summary>
+    private CancellationTokenSource? _refreshCts;
+
+    /// <summary>The cards behind the current filter, kept so the folder view can be built on demand.</summary>
+    private IReadOnlyList<ModCard> _currentCards = Array.Empty<ModCard>();
+
+    public async Task RefreshModsAsync()
+    {
+        // Cancel the previous refresh but let it dispose its own token source in its own
+        // finally block: Npgsql still holds registrations on that token, and disposing it
+        // from here races with them.
+        var cts = new CancellationTokenSource();
+        Interlocked.Exchange(ref _refreshCts, cts)?.Cancel();
+
+        // Every exit path has to clear the field before disposing, or the next refresh
+        // cancels a disposed source and dies with ObjectDisposedException — silently,
+        // since RefreshMods() discards the task.
+        try
+        {
+            if (SelectedRoot is null)
+            {
+                Mods.Clear();
+                FolderTree.Clear();
+                _currentCards = Array.Empty<ModCard>();
+                VisibleModCount = 0;
+                return;
+            }
+
+            var cards = await _library.GetModsAsync(BuildQuery(), cts.Token).ConfigureAwait(true);
+
+            if (cts.IsCancellationRequested) return;
+
+            // Keep the cards that survived the Penumbra filter, not the raw query result:
+            // the folder view builds from this list and must agree with the gallery.
+            var visible = new List<ModCard>(cards.Count);
+
+            Mods.Clear();
+            foreach (var card in cards)
+            {
+                var vm = new ModCardViewModel(card, _thumbnails);
+                vm.RatingChangeRequested += OnRatingChangeRequested;
+                vm.ImagesDroppedOnCard += OnImagesDroppedOnCard;
+                ApplyPenumbraToCard(vm, card);
+
+                if (!PassesPenumbraFilter(vm)) continue;
+                Mods.Add(vm);
+                visible.Add(card);
+            }
+
+            _currentCards = visible;
+            VisibleModCount = Mods.Count;
+            StatusText = $"{VisibleModCount} mods";
+
+            // The folder tree is only built when that view is actually showing. It used to
+            // be rebuilt on every refresh, decoding a second thumbnail for every mod.
+            FolderTree.Clear();
+            if (IsFolderView) BuildFolderTree();
+        }
+        catch (OperationCanceledException) { /* superseded by a newer refresh */ }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "RefreshMods failed");
+            StatusText = "Laden fehlgeschlagen: " + ex.Message;
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _refreshCts, null, cts);
+            cts.Dispose();
+        }
+    }
+
+    /// <summary>Assembles the current sidebar/toolbar state into one query.</summary>
+    private ModQuery BuildQuery() => new()
+    {
+        RootId = SelectedRoot!.Id,
+        CategoryId = SelectedCategory?.Id,
+        SearchText = SearchText,
+        Sort = SelectedSort?.Value ?? ModSort.CategoryThenName,
+        MinRating = MinRating,
+        // Included tags go into the AND or the OR bucket depending on the toggle; the
+        // excluded ones always mean "must not carry".
+        TagsAll = TagMode == TagFilterMode.And ? IncludedTagIds() : Array.Empty<long>(),
+        TagsAny = TagMode == TagFilterMode.Or ? IncludedTagIds() : Array.Empty<long>(),
+        TagsNone = TagFilters.Where(t => t.State == TagFilterState.Exclude).Select(t => t.Id).ToArray(),
+        OnlyUntagged = OnlyUntagged
+    };
+
+    private long[] IncludedTagIds() =>
+        TagFilters.Where(t => t.State == TagFilterState.Include).Select(t => t.Id).ToArray();
+
+    public void ReloadTags() => _ = ReloadTagsAsync();
+
+    /// <summary>
+    /// Reloads the tag vocabulary, preserving whatever the user had selected in the filter
+    /// so renaming or recolouring a tag elsewhere does not silently reset the gallery.
+    /// </summary>
+    public async Task ReloadTagsAsync()
+    {
+        try
+        {
+            var tags = await _tagSvc.GetAllTagsAsync().ConfigureAwait(true);
+
+            var previous = TagFilters
+                .Where(t => t.State != TagFilterState.Off)
+                .ToDictionary(t => t.Id, t => t.State);
+
+            foreach (var existing in TagFilters) existing.StateCycled -= OnTagFilterCycled;
+            TagFilters.Clear();
+            AllTags.Clear();
+
+            foreach (var tag in tags)
+            {
+                AllTags.Add(tag);
+
+                var vm = new TagFilterViewModel(tag);
+                if (previous.TryGetValue(tag.Id, out var state)) vm.State = state;
+                vm.StateCycled += OnTagFilterCycled;
+                TagFilters.Add(vm);
+            }
+
+            OnPropertyChanged(nameof(TagFilterSummary));
+            OnPropertyChanged(nameof(HasTagFilter));
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Tags could not be loaded");
+        }
+    }
+
+    private void OnTagFilterCycled(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(TagFilterSummary));
+        OnPropertyChanged(nameof(HasTagFilter));
+        RefreshMods();
+    }
+
+    [RelayCommand]
+    private void ToggleTagFilter(TagFilterViewModel? tag) => tag?.Cycle();
+
+    [RelayCommand]
+    private void ClearTagFilter()
+    {
+        var changed = OnlyUntagged || TagFilters.Any(t => t.State != TagFilterState.Off);
+        if (!changed) return;
+
+        _suppressFilterRefresh = true;
+        try
+        {
+            OnlyUntagged = false;
+            foreach (var t in TagFilters) t.State = TagFilterState.Off;
+        }
+        finally
+        {
+            _suppressFilterRefresh = false;
+        }
+
+        OnPropertyChanged(nameof(TagFilterSummary));
+        OnPropertyChanged(nameof(HasTagFilter));
+        RefreshMods();
+    }
+
+    [RelayCommand]
+    private void ToggleTagMode() =>
+        TagMode = TagMode == TagFilterMode.And ? TagFilterMode.Or : TagFilterMode.And;
+
+    [RelayCommand]
+    private void OpenTagManager()
+    {
+        var vm = new TagManagerViewModel(_tagSvc);
+        var window = new Views.TagManagerWindow(vm) { Owner = Application.Current.MainWindow };
+        vm.TagsChanged += (_, _) => _ = ReloadAfterTagChangeAsync();
+        window.ShowDialog();
+        _ = ReloadAfterTagChangeAsync();
+    }
+
+    private async Task ReloadAfterTagChangeAsync()
+    {
+        await ReloadTagsAsync().ConfigureAwait(true);
+        await RefreshModsAsync().ConfigureAwait(true);
+    }
+
+    // ---- bulk tagging ----
+    //
+    // The selection is what makes the filter useful: without a way to tag many mods at
+    // once there is nothing to filter on.
+
+    /// <summary>Mods the user has ticked, or the single focused card as a fallback.</summary>
+    private List<long> TargetModIds()
+    {
+        var selected = Mods.Where(m => m.IsSelected).Select(m => m.Id).ToList();
+        if (selected.Count > 0) return selected;
+        return SelectedMod is null ? new List<long>() : new List<long> { SelectedMod.Id };
+    }
+
+    [RelayCommand]
+    private async Task AddTagToSelection(TagInfo? tag)
+    {
+        if (tag is null) return;
+        var ids = TargetModIds();
+        if (ids.Count == 0) return;
+
+        try
+        {
+            var added = await Task.Run(() => _tagSvc.AddTagToMods(tag.Id, ids)).ConfigureAwait(true);
+            Toasts?.Show("Tag hinzugefügt",
+                $"„{tag.Name}“ auf {added} von {ids.Count} Mods", colorHex: tag.ColorHex ?? "#7A5CFA");
+            await ReloadAfterTagChangeAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Tag konnte nicht gesetzt werden",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RemoveTagFromSelection(TagInfo? tag)
+    {
+        if (tag is null) return;
+        var ids = TargetModIds();
+        if (ids.Count == 0) return;
+
+        try
+        {
+            var removed = await Task.Run(() => _tagSvc.RemoveTagFromMods(tag.Id, ids)).ConfigureAwait(true);
+            Toasts?.Show("Tag entfernt", $"„{tag.Name}“ von {removed} Mods", colorHex: "#9E9E9E");
+            await ReloadAfterTagChangeAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Tag konnte nicht entfernt werden",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    /// <summary>Creates a tag from a typed name and applies it to the selection in one step.</summary>
+    [RelayCommand]
+    private async Task CreateAndApplyTag()
+    {
+        var ids = TargetModIds();
+        if (ids.Count == 0) return;
+
+        var dialog = new Views.PromptDialog("Tag anlegen und zuweisen",
+            $"Tag für {ids.Count} Mod(s):");
+        if (Application.Current.MainWindow is { } owner) dialog.Owner = owner;
+        if (dialog.ShowDialog() != true) return;
+
+        var name = (dialog.ResultText ?? "").Trim();
+        if (name.Length == 0) return;
+
+        try
+        {
+            var added = await Task.Run(() =>
+            {
+                var id = _tagSvc.CreateTag(name);
+                return (Id: id, Count: _tagSvc.AddTagToMods(id, ids));
+            }).ConfigureAwait(true);
+
+            Toasts?.Show("Tag angelegt",
+                $"„{name}“ auf {added.Count} von {ids.Count} Mods",
+                colorHex: TagService.DefaultColorFor(name));
+            await ReloadAfterTagChangeAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Tag konnte nicht angelegt werden",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void BuildFolderTree()
+    {
+        FolderTree.Clear();
+        foreach (var group in _currentCards.GroupBy(c => c.CategoryName).OrderBy(g => g.Key))
+        {
+            var catNode = new FolderNodeViewModel(group.Key, "Category");
+            foreach (var card in group.OrderBy(c => c.FolderName))
+            {
+                catNode.Children.Add(new FolderNodeViewModel(
+                    card.FolderName, "Mod", card.Id, _thumbnails, card.PrimaryImageAbsPath));
+            }
+            FolderTree.Add(catNode);
+        }
+    }
+
+    partial void OnIsFolderViewChanged(bool value)
+    {
+        if (value && FolderTree.Count == 0) BuildFolderTree();
+    }
+
+    private void OnRatingChangeRequested(object? sender, int rating)
+    {
+        if (sender is not ModCardViewModel vm) return;
+        _ = SetRatingAsync(vm.Id, rating);
+    }
+
+    private async Task SetRatingAsync(long modId, int rating)
+    {
+        try { await _library.SetRatingAsync(modId, rating).ConfigureAwait(false); }
+        catch (Exception ex) { _log.LogError(ex, "Setting rating for mod {Id} failed", modId); }
+    }
+
+    private void OnImagesDroppedOnCard(object? sender, string[] files)
+    {
+        if (sender is not ModCardViewModel vm) return;
+        var targetFolder = vm.Model.FolderAbsPath;
+        if (!Directory.Exists(targetFolder)) return;
+
+        var imageExtensions = new[] { ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif" };
+        bool any = false;
+        foreach (var file in files)
+        {
+            if (!File.Exists(file)) continue;
+            var ext = Path.GetExtension(file).ToLowerInvariant();
+            if (!imageExtensions.Contains(ext)) continue;
+
+            var stem = vm.FolderName;
+            var dest = Path.Combine(targetFolder, stem + ext);
+            int i = 2;
+            while (File.Exists(dest))
+                dest = Path.Combine(targetFolder, $"{stem} ({i++}){ext}");
+
+            try
+            {
+                File.Copy(file, dest);
+                any = true;
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Failed to copy image {src} to {dest}", file, dest);
+            }
+        }
+
+        if (any && SelectedRoot is not null)
+        {
+            // The card may already be showing a cached decode of the previous preview.
+            _thumbnails.Invalidate(vm.Model.PrimaryImageAbsPath);
+
+            var rootId = SelectedRoot.Id;
+            _ = Task.Run(() =>
+            {
+                try { _scanner.Scan(rootId); }
+                catch (Exception ex) { _log.LogError(ex, "Rescan after image drop failed"); }
+            }).ContinueWith(_ =>
+            {
+                Application.Current.Dispatcher.Invoke(RefreshMods);
+            }, TaskScheduler.Default);
+        }
+    }
+
+    private CancellationTokenSource? _scanCts;
+
+    [RelayCommand]
+    private async Task RescanAsync()
+    {
+        if (SelectedRoot is null) return;
+        if (IsBusy)
+        {
+            _scanCts?.Cancel();
+            return;
+        }
+
+        IsBusy = true;
+        _scanCts = new CancellationTokenSource();
+        var ct = _scanCts.Token;
+        var rootId = SelectedRoot.Id;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var lastReport = DateTime.UtcNow;
+        var progress = new Progress<ScanProgress>(p =>
+        {
+            if ((DateTime.UtcNow - lastReport).TotalMilliseconds < 200) return;
+            lastReport = DateTime.UtcNow;
+            var elapsed = sw.Elapsed;
+            StatusText =
+                $"{p.CurrentCategory} · {p.ModsDone}/{p.ModsTotal} · {p.FilesDone} Dateien · {elapsed.TotalSeconds:F0}s · {p.CurrentMod}";
+        });
+
+        try
+        {
+            var summary = await Task.Run(() => _scanner.Scan(rootId, progress, ct), ct);
+            StatusText = $"Scan fertig: {summary.CategoriesSeen} Kat., {summary.ModsSeen} Mods, {summary.FilesSeen} Dateien in {summary.Duration.TotalSeconds:F1}s";
+            _log.LogInformation("Rescan: {Mods} mods in {Sec}s",
+                summary.ModsSeen, summary.Duration.TotalSeconds);
+            await LoadAsync().ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Scan abgebrochen.";
+            await LoadAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Rescan failed");
+            StatusText = "Scan fehlgeschlagen: " + ex.Message;
+            MessageBox.Show(ex.ToString(), "Scan failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+            _scanCts?.Dispose();
+            _scanCts = null;
+        }
+    }
+
+    [RelayCommand]
+    public void OpenDetail(ModCardViewModel? card)
+    {
+        if (card is null) return;
+        OpenDetailById(card.Id);
+    }
+
+    [RelayCommand]
+    public void OpenDetailById(long modId) => _ = OpenDetailByIdAsync(modId);
+
+    /// <summary>
+    /// Loads the mod's detail data before showing the window. This used to run inside the
+    /// ModDetailViewModel constructor, straight from the mouse-down handler: a dozen
+    /// sequential remote queries on the UI thread, and any one of them timing out threw
+    /// out of a click handler as an unhandled dispatcher exception.
+    /// </summary>
+    public async Task OpenDetailByIdAsync(long modId)
+    {
+        if (modId <= 0) return;
+
+        try
+        {
+            var vm = await _detailFactory.CreateAsync(modId).ConfigureAwait(true);
+            var window = new ModDetailWindow(vm);
+            vm.ModChanged += (_, _) => Load();
+            window.Owner = Application.Current.MainWindow;
+
+            // Tell presence we're now viewing this mod
+            _ = Presence?.SetViewingModAsync(modId);
+            window.Closed += (_, _) => _ = Presence?.SetViewingModAsync(null);
+
+            window.Show();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Opening mod {Id} failed", modId);
+            Toasts?.Show("Mod konnte nicht geöffnet werden", ex.Message, colorHex: "#E5534B");
+        }
+    }
+
+    [RelayCommand]
+    private void OpenCategoryManager()
+    {
+        var vm = _sp.GetRequiredService<CategoryManagerViewModel>();
+        var window = new CategoryManagerWindow(vm);
+        vm.CategoriesChanged += (_, _) => Load();
+        window.Owner = Application.Current.MainWindow;
+        window.ShowDialog();
+    }
+
+    [RelayCommand]
+    private void OpenHealth()
+    {
+        var window = new HealthWindow(_health, SelectedRoot?.Id)
+        {
+            Owner = Application.Current.MainWindow
+        };
+        window.Show();
+    }
+
+    [RelayCommand]
+    private void OpenDuplicates()
+    {
+        var vm = new DuplicatesViewModel(
+            _dupes,
+            _sp.GetRequiredService<Core.Categories.CategoryService>(),
+            _moveSvc,
+            _sp.GetRequiredService<DeleteService>(),
+            SelectedRoot?.Id);
+
+        // Archiving or deleting a duplicate changes the library, so refresh behind it.
+        vm.LibraryChanged += (_, _) => _ = ReloadAfterTagChangeAsync();
+
+        var window = new DuplicatesWindow(vm) { Owner = Application.Current.MainWindow };
+        window.Show();
+    }
+
+    /// <summary>Who is signed in, for the sidebar.</summary>
+    public string AccountLabel
+    {
+        get
+        {
+            var user = _sp.GetService<IUserContext>();
+            if (user?.UserId is null) return "Offline-Modus";
+            return user.DisplayName ?? user.Email ?? "angemeldet";
+        }
+    }
+
+    public void RefreshAccountLabel() => OnPropertyChanged(nameof(AccountLabel));
+
+    /// <summary>
+    /// Signs out and offers the login again. Without this there was no way back to the
+    /// login screen once a session had been remembered — you had to delete token.dat.
+    /// </summary>
+    [RelayCommand]
+    private async Task SignOut()
+    {
+        var supabase = _sp.GetService<SupabaseClientProvider>();
+        if (supabase is null || !supabase.IsConfigured)
+        {
+            MessageBox.Show("Ohne Supabase-Konfiguration läuft die App im Offline-Modus.",
+                "Abmelden", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (MessageBox.Show(
+                "Abmelden und zum Login zurück?\n\n" +
+                "Die Email bleibt gespeichert, beim nächsten Anmelden ist nur das Passwort nötig.",
+                "Abmelden", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        try { await supabase.SignOutAsync().ConfigureAwait(true); }
+        catch (Exception ex) { _log.LogWarning(ex, "Sign-out failed"); }
+
+        RefreshAccountLabel();
+
+        var login = new Views.LoginWindow(supabase) { Owner = Application.Current.MainWindow };
+        login.ShowDialog();
+
+        RefreshAccountLabel();
+        if (login.SignedIn) await LoadAsync().ConfigureAwait(true);
+    }
+
+    [RelayCommand]
+    private void OpenSettings()
+    {
+        var window = new SettingsWindow(_library, _scanner)
+        {
+            Owner = Application.Current.MainWindow
+        };
+        window.ShowDialog();
+        if (window.RootsChanged) Load();
+    }
+
+    [RelayCommand]
+    private void OpenStats()
+    {
+        var statsSvc = _sp.GetRequiredService<StatsService>();
+        var window = new StatsWindow(statsSvc, SelectedRoot?.Id)
+        {
+            Owner = Application.Current.MainWindow
+        };
+        window.Show();
+    }
+
+    [RelayCommand]
+    private void OpenActivityFeed()
+    {
+        var feed = _sp.GetRequiredService<Core.Queries.ActivityFeedService>();
+        var window = new Views.ActivityFeedWindow(feed)
+        {
+            Owner = Application.Current.MainWindow
+        };
+        window.Show();
+    }
+
+    public void ReloadPenumbra() => _ = ReloadPenumbraAsync();
+
+    public async Task ReloadPenumbraAsync()
+    {
+        var penumbraSvc = _sp.GetRequiredService<PenumbraService>();
+        var sync = _sp.GetRequiredService<PenumbraSyncService>();
+
+        // Read() parses Penumbra's config off disk and Push/LoadAll are remote queries.
+        // None of that belongs on the UI thread.
+        var (snapshot, users) = await Task.Run(() =>
+        {
+            PenumbraSnapshot snap;
+            try { snap = penumbraSvc.Read(); }
+            catch { snap = new PenumbraSnapshot(); }
+
+            try
+            {
+                if (snap.IsAvailable && sync.IsLoggedIn) sync.Push(snap);
+            }
+            catch (Exception ex) { _log.LogWarning(ex, "Penumbra push failed"); }
+
+            IReadOnlyList<PenumbraUserSnapshot> loaded;
+            try { loaded = sync.LoadAll(); }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Penumbra pull failed");
+                loaded = Array.Empty<PenumbraUserSnapshot>();
+            }
+
+            return (snap, loaded);
+        }).ConfigureAwait(true);
+
+        _penumbra = snapshot;
+        _penumbraUsers = users;
+
+        OnPropertyChanged(nameof(PenumbraAvailable));
+        RebuildCollectionFilters();
+    }
+
+    private void RebuildCollectionFilters()
+    {
+        var current = PenumbraCollectionFilter;
+        PenumbraCollectionFilters.Clear();
+
+        // Self first, then others, alphabetical inside each user.
+        var groups = _penumbraUsers
+            .OrderByDescending(u => u.IsSelf)
+            .ThenBy(u => u.DisplayName);
+        foreach (var u in groups)
+        {
+            foreach (var c in u.Snapshot.Collections.OrderBy(c => c.Name))
+                PenumbraCollectionFilters.Add(FormatCollectionFilter(u, c.Name));
+        }
+        // If logged-out and we have a local snapshot only, fall back to plain names.
+        if (PenumbraCollectionFilters.Count == 0 && _penumbra.IsAvailable)
+            foreach (var c in _penumbra.Collections.OrderBy(c => c.Name))
+                PenumbraCollectionFilters.Add(c.Name);
+
+        // Preserve user's selection if still present.
+        if (!string.IsNullOrEmpty(current) && PenumbraCollectionFilters.Contains(current))
+            PenumbraCollectionFilter = current;
+    }
+
+    private static string FormatCollectionFilter(PenumbraUserSnapshot u, string collectionName) =>
+        u.IsSelf ? $"{collectionName} (du)" : $"{collectionName} ({u.DisplayName})";
+
+    private void ApplyPenumbraToCard(ModCardViewModel vm, ModCard card)
+    {
+        var active = new List<string>();
+        var all = new List<string>();
+        var status = PenumbraStatus.NotInstalled;
+
+        // Walk all known users (self + remote). If we have no remote, _penumbraUsers
+        // is empty and we fall back to the local snapshot under the synthetic "self".
+        var sources = _penumbraUsers.Count > 0
+            ? _penumbraUsers
+            : (_penumbra.IsAvailable
+                ? new[] { new PenumbraUserSnapshot { DisplayName = "du", IsSelf = true, Snapshot = _penumbra } }
+                : Array.Empty<PenumbraUserSnapshot>());
+
+        foreach (var u in sources)
+        {
+            var entry = u.Snapshot.Lookup(card.FolderName)
+                ?? (string.IsNullOrEmpty(card.DisplayName) ? null : u.Snapshot.Lookup(card.DisplayName!));
+            if (entry is null) continue;
+
+            if ((int)entry.Status > (int)status) status = entry.Status;
+            foreach (var c in entry.ActiveInCollections) active.Add(FormatCollectionFilter(u, c));
+            foreach (var c in entry.AllInCollections)    all.Add(FormatCollectionFilter(u, c));
+        }
+
+        vm.PenumbraStatus = status;
+        vm.PenumbraActiveInCollections = active;
+        vm.PenumbraAllCollections = all;
+    }
+
+    private bool PassesPenumbraFilter(ModCardViewModel vm)
+    {
+        if (PenumbraFilter == PenumbraFilterMode.Imported && vm.PenumbraStatus == PenumbraStatus.NotInstalled)
+            return false;
+        if (PenumbraFilter == PenumbraFilterMode.Active && vm.PenumbraStatus != PenumbraStatus.ActiveDefault)
+            return false;
+        if (!string.IsNullOrEmpty(PenumbraCollectionFilter)
+            && !vm.PenumbraAllCollections.Contains(PenumbraCollectionFilter))
+            return false;
+        return true;
+    }
+
+    [RelayCommand]
+    private async Task RefreshPenumbra()
+    {
+        await ReloadPenumbraAsync().ConfigureAwait(true);
+        await RefreshModsAsync().ConfigureAwait(true);
+        var others = _penumbraUsers.Count(u => !u.IsSelf);
+        Toasts?.Show("Penumbra",
+            _penumbra.IsAvailable
+                ? $"{_penumbra.Entries.Count} Mods · {_penumbra.Collections.Count(c => c.IsActive)} aktiv · {others} weitere User"
+                : (_penumbraUsers.Count > 0
+                    ? $"Lokal nicht gefunden · {_penumbraUsers.Count} User remote"
+                    : "Nicht gefunden"),
+            colorHex: (_penumbra.IsAvailable || _penumbraUsers.Count > 0) ? "#26A69A" : "#9E9E9E");
+    }
+
+    public void ReloadSmartCollections() => _ = ReloadSmartCollectionsAsync();
+
+    public async Task ReloadSmartCollectionsAsync()
+    {
+        try
+        {
+            var svc = _sp.GetRequiredService<SmartCollectionService>();
+            var list = await Task.Run(() => svc.List()).ConfigureAwait(true);
+            SmartCollections.Clear();
+            foreach (var c in list) SmartCollections.Add(c);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Smart collections could not be loaded");
+        }
+    }
+
+    [RelayCommand]
+    private void SaveSmartCollection()
+    {
+        var dlg = new Views.PromptDialog("Smart Collection speichern", "Name:");
+        if (Application.Current.MainWindow is { } owner) dlg.Owner = owner;
+        if (dlg.ShowDialog() != true || string.IsNullOrWhiteSpace(dlg.ResultText)) return;
+
+        // The tag filter is part of what the user sees, so it has to be part of what gets
+        // saved — otherwise the collection silently reproduces a different result set.
+        var filter = new SmartCollectionFilter
+        {
+            CategoryId = SelectedCategory?.Id,
+            MinRating = MinRating,
+            Search = string.IsNullOrWhiteSpace(SearchText) ? null : SearchText,
+            TagIds = TagFilters.Where(t => t.State == TagFilterState.Include).Select(t => t.Id).ToList(),
+            ExcludedTagIds = TagFilters.Where(t => t.State == TagFilterState.Exclude).Select(t => t.Id).ToList(),
+            TagsAnyMode = TagMode == TagFilterMode.Or,
+            OnlyUntagged = OnlyUntagged
+        };
+        var svc = _sp.GetRequiredService<SmartCollectionService>();
+        svc.Create(dlg.ResultText.Trim(), filter);
+        ReloadSmartCollections();
+        Toasts?.Show("Smart Collection", $"„{dlg.ResultText}" + "“ gespeichert", colorHex: "#7A5CFA");
+    }
+
+    [RelayCommand]
+    private void ApplySmartCollection(SmartCollection? sc)
+    {
+        if (sc is null) return;
+        var f = sc.Filter;
+
+        // Apply everything under suppression, then refresh once.
+        _suppressFilterRefresh = true;
+        try
+        {
+            SearchText = f.Search ?? "";
+            MinRating = f.MinRating;
+            SelectedCategory = f.CategoryId is null
+                ? null
+                : Categories.FirstOrDefault(c => c.Id == f.CategoryId.Value);
+
+            TagMode = f.TagsAnyMode ? TagFilterMode.Or : TagFilterMode.And;
+            OnlyUntagged = f.OnlyUntagged;
+
+            var include = f.TagIds.ToHashSet();
+            var exclude = f.ExcludedTagIds.ToHashSet();
+            foreach (var t in TagFilters)
+            {
+                t.State = include.Contains(t.Id) ? TagFilterState.Include
+                        : exclude.Contains(t.Id) ? TagFilterState.Exclude
+                        : TagFilterState.Off;
+            }
+        }
+        finally
+        {
+            _suppressFilterRefresh = false;
+        }
+
+        OnPropertyChanged(nameof(TagFilterSummary));
+        OnPropertyChanged(nameof(HasTagFilter));
+        RefreshMods();
+    }
+
+    [RelayCommand]
+    private void DeleteSmartCollection(SmartCollection? sc)
+    {
+        if (sc is null) return;
+        if (MessageBox.Show($"Smart Collection „{sc.Name}“ löschen?", "Bestätigen",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        _sp.GetRequiredService<SmartCollectionService>().Delete(sc.Id);
+        ReloadSmartCollections();
+    }
+
+    [RelayCommand]
+    private async Task ExportHtmlCatalog()
+    {
+        if (SelectedRoot is null) return;
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Zielordner für HTML-Katalog wählen" };
+        if (dlg.ShowDialog() != true) return;
+
+        try
+        {
+            var cards = await _library.GetModsAsync(BuildQuery()).ConfigureAwait(true);
+
+            var exporter = _sp.GetRequiredService<Services.HtmlCatalogExporter>();
+            var title = "FFXIV Mods – " + (SelectedRoot.DisplayName ?? "");
+            await Task.Run(() => exporter.Export(dlg.FolderName, cards, title)).ConfigureAwait(true);
+            var indexPath = System.IO.Path.Combine(dlg.FolderName, "index.html");
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = indexPath,
+                UseShellExecute = true
+            });
+            Toasts?.Show("Export fertig", $"{cards.Count} Mods exportiert", colorHex: "#26A69A");
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show(ex.Message, "Export fehlgeschlagen",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+        }
+    }
+
+    [RelayCommand]
+    private void OpenHistory()
+    {
+        var window = _sp.GetRequiredService<Views.HistoryWindow>();
+        window.Owner = Application.Current.MainWindow;
+        window.Show();
+    }
+
+    [RelayCommand]
+    private void OpenTrash()
+    {
+        var window = new TrashWindow(_library)
+        {
+            Owner = Application.Current.MainWindow
+        };
+        window.ShowDialog();
+        RefreshMods();
+    }
+
+    [RelayCommand]
+    private void MoveSelectedToCategory(CategoryItemViewModel? target)
+    {
+        if (SelectedMod is null || target is null) return;
+        if (target.Id == SelectedMod.Model.CategoryId) return;
+
+        var plan = _moveSvc.CreatePlan(new[] { SelectedMod.Id }, target.Id);
+        if (plan.Conflicts.Count > 0)
+        {
+            MessageBox.Show(string.Join("\n", plan.Conflicts), "Move conflict",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (plan.CanExecute)
+        {
+            _moveSvc.Execute(plan);
+            RefreshMods();
+            StatusText = $"Moved to {target.Name}";
+        }
+    }
+
+    [RelayCommand]
+    public void ImportFiles(IEnumerable<string>? files)
+    {
+        if (files is null || SelectedRoot is null) return;
+        var list = files.Where(File.Exists).ToList();
+        if (list.Count == 0) return;
+
+        var rootId = SelectedRoot.Id;
+        var importSvc = _sp.GetRequiredService<Core.Import.ImportService>();
+        var dialog = new Dialogs.ImportDialog(importSvc, _library, rootId, list)
+        {
+            Owner = Application.Current.MainWindow
+        };
+        if (dialog.ShowDialog() == true)
+        {
+            // rootId is captured, not re-read: the selection can change between the
+            // dialog closing and this task starting.
+            _ = Task.Run(() =>
+            {
+                try { _scanner.Scan(rootId); }
+                catch (Exception ex) { _log.LogError(ex, "Rescan after import failed"); }
+            }).ContinueWith(_ => Application.Current.Dispatcher.Invoke(Load), TaskScheduler.Default);
+        }
+    }
+
+    [RelayCommand]
+    public void BulkRename()
+    {
+        var selected = Mods.Where(m => m.IsSelected).ToList();
+        if (selected.Count < 2)
+        {
+            MessageBox.Show("Select at least two mods (Ctrl+Click) for bulk rename.",
+                "Bulk Rename", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var svc = _sp.GetRequiredService<RenameService>();
+        var dialog = new Dialogs.BulkRenameDialog(svc, selected.Select(m => m.Id).ToList(), _library)
+        {
+            Owner = Application.Current.MainWindow
+        };
+        if (dialog.ShowDialog() == true)
+        {
+            RefreshMods();
+        }
+    }
+
+    [RelayCommand]
+    private void ToggleViewMode() => IsFolderView = !IsFolderView;
+
+    [RelayCommand]
+    public void OpenDetailFromNode(FolderNodeViewModel? node)
+    {
+        if (node?.ModId is null) return;
+        var card = Mods.FirstOrDefault(m => m.Id == node.ModId.Value);
+        if (card is not null) OpenDetail(card);
+    }
+
+    [RelayCommand]
+    private void ClearSelection()
+    {
+        foreach (var m in Mods) m.IsSelected = false;
+        OnPropertyChanged(nameof(SelectedCount));
+    }
+
+    public event EventHandler? FocusSearchRequested;
+
+    [RelayCommand]
+    private void FocusSearch() => FocusSearchRequested?.Invoke(this, EventArgs.Empty);
+
+    [RelayCommand]
+    private async Task ReloadFromDb()
+    {
+        StatusText = "Reloading from DB…";
+        await LoadAsync().ConfigureAwait(true);
+        StatusText = $"{VisibleModCount} mods · refreshed from DB";
+    }
+
+    public void RefreshSelectedCount() => OnPropertyChanged(nameof(SelectedCount));
+}
+
+public sealed record SortOption(ModSort Value, string Label)
+{
+    public override string ToString() => Label;
+}

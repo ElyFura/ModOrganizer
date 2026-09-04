@@ -1,0 +1,72 @@
+<Window x:Class="ModOrganizer.App.Dialogs.ImportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Import mod file" Height="580" Width="680"
+        Background="{DynamicResource Bg0}" Foreground="{DynamicResource Text}"
+        FontFamily="Segoe UI Variable, Segoe UI" FontSize="13"
+        WindowStartupLocation="CenterOwner">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="{DynamicResource Bg1}" Padding="24,18"
+                BorderBrush="{DynamicResource Border1}" BorderThickness="0,0,0,1">
+            <StackPanel>
+                <TextBlock Text="Import" Style="{DynamicResource H1}" />
+                <TextBlock x:Name="SubtitleText" Style="{DynamicResource Caption}" Margin="0,3,0,0" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="ItemsList" Margin="24,18">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{DynamicResource Bg2}" BorderBrush="{DynamicResource Border1}" BorderThickness="1"
+                                CornerRadius="8" Padding="16" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding SourcePath}" Style="{DynamicResource Caption}" Margin="0,2,0,12" TextTrimming="CharacterEllipsis" />
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="2*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Kategorie" VerticalAlignment="Center" />
+                                    <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding AllCategories}"
+                                              SelectedValue="{Binding SelectedCategoryId}" SelectedValuePath="Id"
+                                              DisplayMemberPath="Name" Margin="0,0,0,8" />
+
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Ordner-Name" VerticalAlignment="Center" />
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding FolderName, UpdateSourceTrigger=PropertyChanged}" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Background="{DynamicResource Bg1}" Padding="24,14"
+                BorderBrush="{DynamicResource Border1}" BorderThickness="0,1,0,0">
+            <DockPanel LastChildFill="False">
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                    <RadioButton x:Name="RbCopy" Content="Copy" IsChecked="True" Foreground="{DynamicResource Text}" Margin="0,0,12,0" />
+                    <RadioButton x:Name="RbMove" Content="Move" Foreground="{DynamicResource Text}" />
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0" />
+                    <Button Content="Import" Click="Ok_Click" Style="{DynamicResource PrimaryButton}" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,45 @@
+<Window x:Class="ModOrganizer.App.Views.HistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Verlauf / Rückgängig"
+        Background="{DynamicResource Bg0}" Foreground="{DynamicResource Text}"
+        FontFamily="Segoe UI Variable, Segoe UI" FontSize="13"
+        Height="640" Width="900">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="{DynamicResource Bg1}" Padding="24,18"
+                BorderBrush="{DynamicResource Border1}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Reload" Click="Reload_Click" />
+                <StackPanel>
+                    <TextBlock Text="Verlauf" Style="{DynamicResource H1}" />
+                    <TextBlock Text="Letzte Aktionen mit Möglichkeit zum Rückgängig-Machen" Style="{DynamicResource Caption}" Margin="0,3,0,0" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <DataGrid Grid.Row="1" x:Name="Grid" AutoGenerateColumns="False"
+                  IsReadOnly="True" Margin="20,14"
+                  RowDetailsVisibilityMode="Collapsed">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Zeit" Binding="{Binding TimeText}" Width="120" />
+                <DataGridTextColumn Header="User" Binding="{Binding UserName}" Width="120" />
+                <DataGridTextColumn Header="Aktion" Binding="{Binding KindText}" Width="120" />
+                <DataGridTextColumn Header="Mod" Binding="{Binding ModName}" Width="*" />
+                <DataGridTemplateColumn Header="" Width="120">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Button Content="Rückgängig" Click="Undo_Click" Tag="{Binding}"
+                                    Visibility="{Binding CanUndo, Converter={StaticResource BoolToVisible}}"
+                                    Padding="8,3" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</Window>

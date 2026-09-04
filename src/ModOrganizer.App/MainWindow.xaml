@@ -1,0 +1,617 @@
+<Window x:Class="ModOrganizer.App.MainWindow"
+        x:Name="RootWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:ModOrganizer.App.ViewModels"
+        xmlns:ctl="clr-namespace:ModOrganizer.App.Controls"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="FFXIV Mod Organizer" Height="860" Width="1400" MinWidth="1080" MinHeight="620"
+        Background="{DynamicResource Bg0}" Foreground="{DynamicResource Text}"
+        FontFamily="Segoe UI Variable, Segoe UI" FontSize="13"
+        AllowDrop="True" DragOver="Window_DragOver" Drop="Window_Drop"
+        d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
+        TextOptions.TextFormattingMode="Ideal" TextOptions.TextRenderingMode="ClearType">
+
+    <Window.InputBindings>
+        <KeyBinding Key="F" Modifiers="Control" Command="{Binding FocusSearchCommand}" />
+        <KeyBinding Key="F5" Command="{Binding RescanCommand}" />
+        <KeyBinding Key="G" Modifiers="Control" Command="{Binding ToggleViewModeCommand}" />
+        <KeyBinding Key="K" Modifiers="Control" Command="{Binding OpenCategoryManagerCommand}" />
+        <KeyBinding Key="H" Modifiers="Control" Command="{Binding OpenHealthCommand}" />
+        <KeyBinding Key="D" Modifiers="Control" Command="{Binding OpenDuplicatesCommand}" />
+        <KeyBinding Key="M" Modifiers="Control" Command="{Binding OpenStatsCommand}" />
+        <KeyBinding Key="T" Modifiers="Control+Shift" Command="{Binding OpenTrashCommand}" />
+        <KeyBinding Key="T" Modifiers="Control" Command="{Binding OpenTagManagerCommand}" />
+        <KeyBinding Key="Comma" Modifiers="Control" Command="{Binding OpenSettingsCommand}" />
+        <KeyBinding Key="Enter" Command="{Binding OpenDetailCommand}" CommandParameter="{Binding SelectedMod}" />
+        <KeyBinding Key="Escape" Command="{Binding ClearSelectionCommand}" />
+    </Window.InputBindings>
+
+    <Window.Resources>
+
+        <!-- Mod card -->
+        <DataTemplate DataType="{x:Type vm:ModCardViewModel}">
+            <Border x:Name="CardBorder"
+                    Width="{Binding DataContext.ThumbnailSize, ElementName=RootWindow}"
+                    Height="{Binding DataContext.ThumbHeight, ElementName=RootWindow}"
+                    Margin="6" CornerRadius="10"
+                    Background="{DynamicResource Bg2}"
+                    BorderBrush="{DynamicResource Border1}" BorderThickness="1"
+                    MouseLeftButtonDown="Card_MouseDown"
+                    MouseRightButtonUp="Card_RightClick"
+                    AllowDrop="True"
+                    DragOver="Card_DragOver"
+                    Drop="Card_Drop"
+                    Tag="{Binding}" Cursor="Hand">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="{Binding DataContext.ThumbImageHeight, ElementName=RootWindow}" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Thumbnail -->
+                    <Border Grid.Row="0" CornerRadius="10,10,0,0" ClipToBounds="True" Background="#0A0A0F">
+                        <Grid>
+                            <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                            <Border Background="#121218" Visibility="{Binding HasImage, Converter={StaticResource BoolToCollapsed}}">
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock Text="&#xE91B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                               FontSize="32" Foreground="{DynamicResource TextFaint}"
+                                               HorizontalAlignment="Center" />
+                                    <TextBlock Text="no preview" Style="{DynamicResource Caption}"
+                                               HorizontalAlignment="Center" Margin="0,6,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="SelectedMark" Background="#803A2CFF"
+                                    Visibility="{Binding IsSelected, Converter={StaticResource BoolToVisible}}"
+                                    BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="10,10,0,0" />
+
+                            <!-- Penumbra status pill -->
+                            <Border CornerRadius="8" Padding="6,2"
+                                    Background="{Binding PenumbraBrush}"
+                                    HorizontalAlignment="Left" VerticalAlignment="Top"
+                                    Margin="8,8,0,0"
+                                    Visibility="{Binding PenumbraVisible, Converter={StaticResource BoolToVisible}}">
+                                <TextBlock Text="{Binding PenumbraText}" Foreground="White"
+                                           FontSize="10" FontWeight="SemiBold" />
+                            </Border>
+
+                            <!-- Avatar chip: shows last editor of this mod -->
+                            <Border Width="28" Height="28" CornerRadius="14"
+                                    Background="{Binding UpdatedByBrush}"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                                    Margin="0,8,8,0"
+                                    Visibility="{Binding HasUpdatedBy, Converter={StaticResource BoolToVisible}}"
+                                    ToolTip="{Binding UpdatedByName}">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.45" />
+                                </Border.Effect>
+                                <TextBlock Text="{Binding UpdatedByInitials}" Foreground="White"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           FontSize="11" FontWeight="SemiBold" />
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <!-- Info -->
+                    <StackPanel Grid.Row="1" Margin="14,10,14,12" VerticalAlignment="Top">
+                        <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Text}"
+                                   TextTrimming="CharacterEllipsis" />
+
+                        <TextBlock Text="{Binding CategoryName}" Style="{DynamicResource Caption}"
+                                   Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
+
+                        <!-- Rating stars -->
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0" HorizontalAlignment="Left">
+                            <Button Command="{Binding SetRatingCommand}" CommandParameter="1" Tag="{Binding}"
+                                    Background="Transparent" BorderBrush="Transparent" Padding="0" Margin="0,0,2,0">
+                                <TextBlock Text="★" FontSize="18">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#515263" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Rating, Converter={StaticResource Ge}, ConverterParameter=1}" Value="True">
+                                                    <Setter Property="Foreground" Value="#FFD166" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button>
+                            <Button Command="{Binding SetRatingCommand}" CommandParameter="2"
+                                    Background="Transparent" BorderBrush="Transparent" Padding="0" Margin="0,0,2,0">
+                                <TextBlock Text="★" FontSize="18">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#515263" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Rating, Converter={StaticResource Ge}, ConverterParameter=2}" Value="True">
+                                                    <Setter Property="Foreground" Value="#FFD166" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button>
+                            <Button Command="{Binding SetRatingCommand}" CommandParameter="3"
+                                    Background="Transparent" BorderBrush="Transparent" Padding="0" Margin="0,0,2,0">
+                                <TextBlock Text="★" FontSize="18">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#515263" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Rating, Converter={StaticResource Ge}, ConverterParameter=3}" Value="True">
+                                                    <Setter Property="Foreground" Value="#FFD166" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button>
+                            <Button Command="{Binding SetRatingCommand}" CommandParameter="4"
+                                    Background="Transparent" BorderBrush="Transparent" Padding="0" Margin="0,0,2,0">
+                                <TextBlock Text="★" FontSize="18">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#515263" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Rating, Converter={StaticResource Ge}, ConverterParameter=4}" Value="True">
+                                                    <Setter Property="Foreground" Value="#FFD166" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button>
+                            <Button Command="{Binding SetRatingCommand}" CommandParameter="5"
+                                    Background="Transparent" BorderBrush="Transparent" Padding="0">
+                                <TextBlock Text="★" FontSize="18">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#515263" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Rating, Converter={StaticResource Ge}, ConverterParameter=5}" Value="True">
+                                                    <Setter Property="Foreground" Value="#FFD166" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button>
+                        </StackPanel>
+
+                        <!-- Tag chips: the plan's "kleine farbige Tag-Chips" on each card -->
+                        <ItemsControl ItemsSource="{Binding Tags}" Margin="0,6,0,0"
+                                      Visibility="{Binding HasTags, Converter={StaticResource BoolToVisible}}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border CornerRadius="8" Padding="6,1" Margin="0,0,4,3"
+                                            Background="{Binding Converter={StaticResource TagBrush}}">
+                                        <TextBlock Text="{Binding Name}" Foreground="White"
+                                                   FontSize="9" FontWeight="Medium" />
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                            <Border Background="{DynamicResource Bg3}" CornerRadius="4" Padding="6,2" Margin="0,0,4,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="pmp" Foreground="{DynamicResource TextDim}" FontSize="10" Margin="0,0,4,0" />
+                                    <TextBlock Text="{Binding PmpCount}" Foreground="{DynamicResource Text}" FontSize="10" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                            <Border Background="{DynamicResource Bg3}" CornerRadius="4" Padding="6,2" Margin="0,0,4,0"
+                                    Visibility="{Binding TtmpCount, Converter={StaticResource BoolToVisible}, FallbackValue=Collapsed}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="ttmp" Foreground="{DynamicResource TextDim}" FontSize="10" Margin="0,0,4,0" />
+                                    <TextBlock Text="{Binding TtmpCount}" Foreground="{DynamicResource Text}" FontSize="10" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                            <Border Background="{DynamicResource Bg3}" CornerRadius="4" Padding="6,2" Margin="0,0,4,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="img" Foreground="{DynamicResource TextDim}" FontSize="10" Margin="0,0,4,0" />
+                                    <TextBlock Text="{Binding ImageCount}" Foreground="{DynamicResource Text}" FontSize="10" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <Trigger SourceName="CardBorder" Property="IsMouseOver" Value="True">
+                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource Accent}" />
+                </Trigger>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource Accent}" />
+                    <Setter TargetName="CardBorder" Property="BorderThickness" Value="2" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="280" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- ========== Sidebar ========== -->
+        <Border Grid.Column="0" Background="{DynamicResource Bg1}" BorderBrush="{DynamicResource Border1}" BorderThickness="0,0,1,0">
+            <DockPanel LastChildFill="True">
+
+                <Border DockPanel.Dock="Top" Padding="20,18,20,8">
+                    <StackPanel>
+                            <TextBlock Text="Mod Organizer" Style="{DynamicResource H2}" FontSize="16" />
+                        <DockPanel LastChildFill="True" Margin="0,2,0,0">
+                            <Button DockPanel.Dock="Right" Content="Abmelden" Padding="6,1" FontSize="10"
+                                    Background="Transparent" BorderThickness="0"
+                                    Foreground="{DynamicResource TextDim}"
+                                    Command="{Binding SignOutCommand}"
+                                    ToolTip="Abmelden und Benutzer wechseln" />
+                            <TextBlock Text="{Binding AccountLabel}" Style="{DynamicResource Caption}"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <StackPanel DockPanel.Dock="Top" Margin="20,10,20,0">
+                    <TextBlock Text="ROOT" Style="{DynamicResource Label}" />
+                    <ComboBox ItemsSource="{Binding Roots}" SelectedItem="{Binding SelectedRoot}"
+                              DisplayMemberPath="DisplayName" />
+
+                    <TextBlock Text="SEARCH" Style="{DynamicResource Label}" Margin="0,14,0,6" />
+                    <TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
+
+                    <TextBlock Text="MIN RATING" Style="{DynamicResource Label}" Margin="0,14,0,6" />
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding MinRating}"
+                                   VerticalAlignment="Center" MinWidth="16" Foreground="{DynamicResource TextDim}" />
+                        <Slider Value="{Binding MinRating}" Minimum="0" Maximum="5" TickFrequency="1"
+                                IsSnapToTickEnabled="True" Margin="0,0,10,0" />
+                    </DockPanel>
+                </StackPanel>
+
+                <StackPanel DockPanel.Dock="Top" Margin="20,14,20,0">
+                    <UniformGrid Columns="2" Rows="1">
+                        <Button Content="Rescan" Command="{Binding RescanCommand}" Style="{DynamicResource PrimaryButton}" Margin="0,0,3,0"
+                                ToolTip="F5: Disk durchsuchen (langsam, alle Dateien lesen)" />
+                        <Button Content="Reload" Command="{Binding ReloadFromDbCommand}" Margin="3,0,0,0"
+                                ToolTip="Nur aus der DB neu laden (zieht Partner-Änderungen)" />
+                    </UniformGrid>
+                    <Button Content="Settings (Ctrl+,)" Command="{Binding OpenSettingsCommand}" Margin="0,6,0,0" Padding="0,6" FontSize="11" />
+                    <UniformGrid Columns="3" Rows="1" Margin="0,6,0,0">
+                        <Button Content="Categories" Command="{Binding OpenCategoryManagerCommand}" Margin="0,0,3,0" Padding="0,6" FontSize="11" />
+                        <Button Content="Health" Command="{Binding OpenHealthCommand}" Margin="3,0,3,0" Padding="0,6" FontSize="11" />
+                        <Button Content="Dupes" Command="{Binding OpenDuplicatesCommand}" Margin="3,0,0,0" Padding="0,6" FontSize="11" />
+                    </UniformGrid>
+                    <UniformGrid Columns="2" Rows="2" Margin="0,6,0,0">
+                        <Button Content="Stats" Command="{Binding OpenStatsCommand}" Margin="0,0,3,3" Padding="0,6" FontSize="11" />
+                        <Button Content="Activity" Command="{Binding OpenActivityFeedCommand}" Margin="3,0,0,3" Padding="0,6" FontSize="11" />
+                        <Button Content="Verlauf" Command="{Binding OpenHistoryCommand}" Margin="0,3,3,0" Padding="0,6" FontSize="11" />
+                        <Button Content="Trash" Command="{Binding OpenTrashCommand}" Margin="3,3,0,0" Padding="0,6" FontSize="11" />
+                    </UniformGrid>
+                    <Button Content="HTML Export" Command="{Binding ExportHtmlCatalogCommand}" Margin="0,6,0,0" Padding="0,6" FontSize="11" />
+                    <Button Content="Penumbra prüfen" Command="{Binding RefreshPenumbraCommand}" Margin="0,6,0,0" Padding="0,6" FontSize="11" />
+                </StackPanel>
+
+                <!-- One scroll region for categories, tags and smart collections. Docking
+                     each separately let the category list eat the whole sidebar. -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel>
+
+                <Border Padding="20,22,20,6">
+                    <DockPanel>
+                        <TextBlock Text="CATEGORIES" Style="{DynamicResource Label}" Margin="0" />
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding Categories.Count, StringFormat={}{0}}"
+                                   Style="{DynamicResource Caption}" HorizontalAlignment="Right" />
+                    </DockPanel>
+                </Border>
+
+                <!-- Bounded so the tag filter below stays on screen instead of sitting
+                     past 14 categories' worth of scrolling. -->
+                <ListBox Style="{DynamicResource SidebarListBox}"
+                         ItemsSource="{Binding Categories}"
+                         SelectedItem="{Binding SelectedCategory}"
+                         MaxHeight="170"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel LastChildFill="True">
+                                <Border DockPanel.Dock="Right" Background="#2E2F3B" CornerRadius="8"
+                                        Padding="6,1" VerticalAlignment="Center" MinWidth="26">
+                                    <TextBlock Text="{Binding ModCount}" FontSize="10" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextDim}"
+                                               HorizontalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" FontSize="13"
+                                           TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
+                            </DockPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <!-- Tag filter: each chip cycles Off -> include -> exclude on click -->
+                <Border Padding="20,18,20,6">
+                    <DockPanel>
+                        <TextBlock Text="TAGS" Style="{DynamicResource Label}" Margin="0" />
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Content="{Binding TagMode}" Padding="6,1" FontSize="10"
+                                    Command="{Binding ToggleTagModeCommand}"
+                                    ToolTip="Zwischen UND und ODER umschalten" Margin="0,0,4,0" />
+                            <Button Content="✕" Padding="5,1" FontSize="10"
+                                    Command="{Binding ClearTagFilterCommand}"
+                                    Visibility="{Binding HasTagFilter, Converter={StaticResource BoolToVisible}}"
+                                    ToolTip="Tag-Filter zurücksetzen" Margin="0,0,4,0" />
+                            <Button Content="⚙" Padding="5,1" FontSize="10"
+                                    Command="{Binding OpenTagManagerCommand}"
+                                    ToolTip="Tags verwalten (Strg+T)" />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <Border Margin="16,0,10,0">
+                    <StackPanel>
+                        <ItemsControl ItemsSource="{Binding TagFilters}" Margin="4,0,0,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Margin="0,0,5,5" Padding="0" BorderThickness="0"
+                                            Background="Transparent" Cursor="Hand"
+                                            AutomationProperties.Name="{Binding Name}"
+                                            Command="{Binding DataContext.ToggleTagFilterCommand,
+                                                      RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}">
+                                        <Button.ToolTip>
+                                            <TextBlock>
+                                                <Run Text="{Binding Name, Mode=OneWay}" />
+                                                <Run Text=" · " Foreground="Gray" />
+                                                <Run Text="{Binding UsageCount, Mode=OneWay}" Foreground="Gray" />
+                                                <Run Text=" Mods · Klick: einschließen / ausschließen / aus"
+                                                     Foreground="Gray" />
+                                            </TextBlock>
+                                        </Button.ToolTip>
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border CornerRadius="10" Padding="8,3"
+                                                        Background="{Binding Background}"
+                                                        BorderBrush="{Binding BorderBrush}" BorderThickness="1">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="{Binding Prefix}"
+                                                                   Foreground="{Binding Foreground}"
+                                                                   FontSize="11" FontWeight="Bold" />
+                                                        <TextBlock Text="{Binding Name}"
+                                                                   Foreground="{Binding Foreground}"
+                                                                   FontSize="11" />
+                                                        <TextBlock Text="{Binding UsageCount}" FontSize="9"
+                                                                   Foreground="{Binding Foreground}"
+                                                                   Opacity="0.6" Margin="5,1,0,0"
+                                                                   VerticalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock Text="Noch keine Tags — über ⚙ anlegen, oder Mods auswählen und rechtsklicken."
+                                   Style="{DynamicResource Caption}" TextWrapping="Wrap" Margin="4,2,6,6"
+                                   Visibility="{Binding TagFilters.Count, Converter={StaticResource BoolToCollapsed},
+                                                FallbackValue=Visible}" />
+
+                        <CheckBox Content="nur ohne Tags" IsChecked="{Binding OnlyUntagged}"
+                                  Margin="4,2,0,6" FontSize="11"
+                                  Foreground="{DynamicResource TextDim}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Padding="20,18,20,6">
+                    <DockPanel>
+                        <TextBlock Text="SMART COLLECTIONS" Style="{DynamicResource Label}" Margin="0" />
+                        <Button DockPanel.Dock="Right" Content="+" Padding="6,0" FontSize="13"
+                                Command="{Binding SaveSmartCollectionCommand}"
+                                ToolTip="Aktuellen Filter als Smart Collection speichern" />
+                    </DockPanel>
+                </Border>
+                <ItemsControl ItemsSource="{Binding SmartCollections}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel LastChildFill="True" Margin="20,2">
+                                <Button DockPanel.Dock="Right" Content="✕" Padding="4,0" FontSize="10"
+                                        Background="Transparent" BorderThickness="0"
+                                        Foreground="{DynamicResource TextDim}"
+                                        Command="{Binding DataContext.DeleteSmartCollectionCommand,
+                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}" />
+                                <Button HorizontalContentAlignment="Left" Padding="6,4"
+                                        Background="Transparent" BorderThickness="0"
+                                        Command="{Binding DataContext.ApplySmartCollectionCommand,
+                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}">
+                                    <TextBlock Text="{Binding Name}" FontSize="13"
+                                               TextTrimming="CharacterEllipsis" />
+                                </Button>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                  </StackPanel>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
+        <!-- ========== Content ========== -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Background="{DynamicResource Bg0}" Padding="28,20,20,16"
+                    BorderBrush="{DynamicResource Border1}" BorderThickness="0,0,0,1">
+                <DockPanel LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="Größe:" VerticalAlignment="Center" Foreground="{DynamicResource TextDim}" Margin="0,0,6,0" />
+                        <Slider Value="{Binding ThumbnailSize}" Minimum="180" Maximum="440"
+                                TickFrequency="20" IsSnapToTickEnabled="True"
+                                Width="100" VerticalAlignment="Center" Margin="0,0,14,0" />
+                        <TextBlock Text="Penumbra:" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextDim}" Margin="0,0,6,0"
+                                   Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}" />
+                        <ComboBox ItemsSource="{Binding PenumbraFilterModes}" SelectedItem="{Binding PenumbraFilter}"
+                                  Width="100" Margin="0,0,6,0"
+                                  Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}" />
+                        <ComboBox ItemsSource="{Binding PenumbraCollectionFilters}"
+                                  SelectedItem="{Binding PenumbraCollectionFilter}"
+                                  IsEditable="True" Width="160" Margin="0,0,14,0"
+                                  Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}"
+                                  ToolTip="Nur Mods aus dieser Collection (leer = alle)" />
+                        <TextBlock Text="Sort:" VerticalAlignment="Center" Foreground="{DynamicResource TextDim}" Margin="0,0,6,0" />
+                        <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SelectedSort}"
+                                  Width="190" Margin="0,0,14,0" />
+                        <Button Command="{Binding BulkRenameCommand}" Padding="10,6" Margin="0,0,6,0"
+                                Visibility="{Binding SelectedCount, Converter={StaticResource BoolToVisible}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Bulk rename " />
+                                <TextBlock Text="(" Foreground="{DynamicResource TextDim}" />
+                                <TextBlock Text="{Binding SelectedCount}" Foreground="{DynamicResource TextDim}" />
+                                <TextBlock Text=")" Foreground="{DynamicResource TextDim}" />
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding ClearSelectionCommand}" Content="Clear" Padding="10,6" Margin="0,0,6,0"
+                                Visibility="{Binding SelectedCount, Converter={StaticResource BoolToVisible}}" />
+                        <Button Command="{Binding ToggleViewModeCommand}" Padding="10,6">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE8A9;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                           FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding IsFolderView, Converter={StaticResource ViewModeLabel}}"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <StackPanel>
+                        <TextBlock Style="{DynamicResource H1}">
+                            <Run Text="{Binding SelectedCategory.Name, Mode=OneWay, FallbackValue='All mods'}" />
+                        </TextBlock>
+                        <TextBlock Style="{DynamicResource Caption}" Margin="0,3,0,0">
+                            <Run Text="{Binding VisibleModCount, Mode=OneWay}" />
+                            <Run Text=" mods visible · drop .pmp/.ttmp2 files here to import" />
+                        </TextBlock>
+                        <Border Background="#2A2440" CornerRadius="6" Padding="8,3" Margin="0,6,0,0"
+                                HorizontalAlignment="Left"
+                                Visibility="{Binding HasTagFilter, Converter={StaticResource BoolToVisible}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Tags:" Foreground="{DynamicResource TextDim}"
+                                           FontSize="11" Margin="0,0,5,0" />
+                                <TextBlock Text="{Binding TagFilterSummary}" Foreground="#C9BEFF"
+                                           FontSize="11" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <Grid Grid.Row="1" Background="{DynamicResource Bg0}"
+                  Visibility="{Binding IsFolderView, Converter={StaticResource BoolToCollapsed}}">
+                <Grid>
+                    <!-- Virtualized: only the cards in view are realized, so a
+                         300-mod library materializes ~20 containers, not 300. -->
+                    <ItemsControl ItemsSource="{Binding Mods}" Padding="22,18"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.VirtualizationMode="Standard"
+                                  VirtualizingPanel.ScrollUnit="Pixel"
+                                  ScrollViewer.CanContentScroll="True">
+                        <ItemsControl.Template>
+                            <ControlTemplate TargetType="ItemsControl">
+                                <ScrollViewer CanContentScroll="True"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              Padding="{TemplateBinding Padding}"
+                                              Focusable="False">
+                                    <ItemsPresenter />
+                                </ScrollViewer>
+                            </ControlTemplate>
+                        </ItemsControl.Template>
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <ctl:VirtualizingWrapPanel
+                                    ItemWidth="{Binding DataContext.ThumbnailSize, ElementName=RootWindow, Converter={StaticResource Add}, ConverterParameter=12}"
+                                    ItemHeight="{Binding DataContext.ThumbHeight, ElementName=RootWindow, Converter={StaticResource Add}, ConverterParameter=12}" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Visibility="{Binding VisibleModCount, Converter={StaticResource BoolToCollapsed}, FallbackValue=Collapsed}">
+                        <TextBlock Text="&#xE7BA;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="48" Foreground="{DynamicResource TextFaint}"
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="No mods match the current filter" Style="{DynamicResource H2}"
+                                   Foreground="{DynamicResource TextDim}" Margin="0,12,0,0" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <ScrollViewer Grid.Row="1" Background="{DynamicResource Bg0}"
+                          Visibility="{Binding IsFolderView, Converter={StaticResource BoolToVisible}}"
+                          VerticalScrollBarVisibility="Auto">
+                <TreeView ItemsSource="{Binding FolderTree}" Padding="22,18"
+                          MouseDoubleClick="FolderTree_DoubleClick">
+                    <TreeView.Resources>
+                        <HierarchicalDataTemplate DataType="{x:Type vm:FolderNodeViewModel}" ItemsSource="{Binding Children}">
+                            <Grid Margin="2,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Width="36" Height="36" Background="{DynamicResource Bg3}"
+                                        CornerRadius="4" ClipToBounds="True" Margin="0,0,10,0">
+                                    <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"
+                                           RenderOptions.BitmapScalingMode="HighQuality" />
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Name}" FontSize="13" />
+                                    <TextBlock Text="{Binding NodeKind}" Style="{DynamicResource Caption}" FontSize="10" />
+                                </StackPanel>
+                            </Grid>
+                        </HierarchicalDataTemplate>
+                    </TreeView.Resources>
+                </TreeView>
+            </ScrollViewer>
+
+            <Border Grid.Row="2" Background="{DynamicResource Bg1}" Padding="28,8"
+                    BorderBrush="{DynamicResource Border1}" BorderThickness="0,1,0,0">
+                <TextBlock Style="{DynamicResource Caption}">
+                    <Run Text="Doppelklick öffnet Detail · Rechtsklick: Kategorie-Menü · Ctrl+Click: Multi-Select · Drop Images auf Card setzt Preview" />
+                </TextBlock>
+            </Border>
+        </Grid>
+
+        <Grid Grid.ColumnSpan="2" Background="#CC000000"
+              Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisible}}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="800">
+                <TextBlock Text="&#xE895;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                           FontSize="48" Foreground="White" HorizontalAlignment="Center" />
+                <TextBlock Text="Scanning…" Foreground="White" FontSize="18" Margin="0,12,0,4"
+                           HorizontalAlignment="Center" />
+                <TextBlock Text="{Binding StatusText}" Foreground="#CCCCCC" FontSize="12"
+                           TextAlignment="Center" TextWrapping="Wrap" Margin="20,0,20,12" />
+                <Button Content="Abbrechen" Command="{Binding RescanCommand}"
+                        HorizontalAlignment="Center" Padding="16,6" Margin="0,8,0,0" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
