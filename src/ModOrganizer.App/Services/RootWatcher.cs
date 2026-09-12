@@ -20,7 +20,10 @@ public sealed class RootWatcher : IDisposable
     private readonly Dispatcher _dispatcher;
     private readonly Dictionary<long, FileSystemWatcher> _watchers = new();
     private readonly Dictionary<long, DispatcherTimer> _debouncers = new();
-    private readonly TimeSpan _debounce = TimeSpan.FromSeconds(2);
+    // Long enough that a Nextcloud transfer of many files settles into one scan instead
+    // of a dozen. A scan of a big library takes minutes, so firing eagerly costs far more
+    // than waiting a few extra seconds.
+    private readonly TimeSpan _debounce = TimeSpan.FromSeconds(6);
 
     private readonly FileSystemActivityGate _gate;
 
@@ -130,6 +133,20 @@ public sealed class RootWatcher : IDisposable
             _scanner.Scan(rootId);
             _dispatcher.BeginInvoke(() =>
                 RescanCompleted?.Invoke(this, EventArgs.Empty));
+        }
+        catch (ScanAlreadyRunningException)
+        {
+            // A manual scan or an earlier trigger is still working. Try again after the
+            // debounce instead of piling a second scan onto the same root.
+            _log.LogDebug("Auto-rescan for root {Id} skipped: scan already running", rootId);
+            _dispatcher.BeginInvoke(() =>
+            {
+                if (_debouncers.TryGetValue(rootId, out var timer)) timer.Start();
+            });
+        }
+        catch (RootNotMappedException)
+        {
+            // Nothing to do until the user maps this library on this PC.
         }
         catch (Exception ex)
         {

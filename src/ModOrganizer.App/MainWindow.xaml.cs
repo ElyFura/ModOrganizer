@@ -165,6 +165,12 @@ public partial class MainWindow : Window
         catch { }
     }
 
+    /// <summary>Leaves the "only missing mods" review list and shows the library again.</summary>
+    private void ExitMissingView_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm) vm.ShowMissingOnly = false;
+    }
+
     private void Toast_Click(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement fe && fe.Tag is Services.Toast t)

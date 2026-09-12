@@ -51,6 +51,35 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private TagFilterMode _tagMode = TagFilterMode.And;
     [ObservableProperty] private bool _onlyUntagged;
 
+    // ---- mods that are no longer on disk ----
+
+    /// <summary>
+    /// Mods the last scan did not find. They are hidden from the gallery by default - a
+    /// deleted mod is not part of the library any more - but never removed on their own,
+    /// because with a synced folder "gone" can simply mean "not synced yet".
+    /// </summary>
+    [ObservableProperty] private int _missingCount;
+
+    /// <summary>The review list: show only the gone-from-disk mods, so they can be cleaned up.</summary>
+    [ObservableProperty] private bool _showMissingOnly;
+
+    public bool HasMissing => MissingCount > 0;
+
+    public string MissingBannerText => MissingCount == 1
+        ? "1 Mod ist nicht mehr im Ordner"
+        : $"{MissingCount} Mods sind nicht mehr im Ordner";
+
+    partial void OnMissingCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasMissing));
+        OnPropertyChanged(nameof(MissingBannerText));
+    }
+
+    partial void OnShowMissingOnlyChanged(bool value)
+    {
+        if (!_suppressFilterRefresh) RefreshMods();
+    }
+
     /// <summary>
     /// Set while several filter properties are being reset together, so the gallery
     /// reloads once at the end instead of once per property.
@@ -239,6 +268,88 @@ public sealed partial class MainViewModel : ObservableObject
         foreach (var c in categories) Categories.Add(new CategoryItemViewModel(c));
 
         await RefreshModsAsync().ConfigureAwait(true);
+        await RefreshMissingCountAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Recounts the gone-from-disk mods of the current root. Kept out of RefreshModsAsync
+    /// on purpose: that one runs on every keystroke, and this only changes after a scan.
+    /// </summary>
+    public async Task RefreshMissingCountAsync()
+    {
+        if (SelectedRoot is null)
+        {
+            MissingCount = 0;
+            if (ShowMissingOnly) ShowMissingOnly = false;
+            return;
+        }
+
+        try
+        {
+            MissingCount = await _library.CountMissingAsync(SelectedRoot.Id).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "CountMissing failed");
+            MissingCount = 0;
+        }
+
+        // Leaving the review list up when it is empty would look like the gallery broke.
+        if (MissingCount == 0 && ShowMissingOnly) ShowMissingOnly = false;
+    }
+
+    /// <summary>
+    /// Gallery plus the missing-mod banner. Every scan that runs in the background - the
+    /// folder watcher, an import, a partner's change pushed over realtime - has to go
+    /// through here, otherwise the banner keeps showing a count from before the scan.
+    /// </summary>
+    public void RefreshAfterScan()
+    {
+        RefreshMods();
+        _ = RefreshMissingCountAsync();
+    }
+
+    /// <summary>Opens the review list of mods that are no longer in the folder.</summary>
+    [RelayCommand]
+    private void ReviewMissing() => ShowMissingOnly = true;
+
+    /// <summary>
+    /// Clears the gone-from-disk mods out of the library. They go to the trash rather than
+    /// being erased, so a mod that was only missing because a sync had not finished can be
+    /// brought back with its rating, tags and comments intact.
+    /// </summary>
+    [RelayCommand]
+    private async Task TrashMissing()
+    {
+        if (SelectedRoot is null || MissingCount == 0) return;
+        var root = SelectedRoot;
+        var count = MissingCount;
+
+        var answer = MessageBox.Show(
+            $"{count} Mod(s) sind nicht mehr im Ordner „{root.DisplayName}\".\n\n" +
+            "Sie wandern in den Papierkorb - Bewertungen, Tags und Kommentare bleiben " +
+            "erhalten und lassen sich von dort wiederherstellen. Auf der Festplatte wird " +
+            "nichts gelöscht, die Ordner sind ja bereits weg.\n\n" +
+            "Achtung: Wenn der Mod-Ordner gerade noch synchronisiert wird, sind die Mods " +
+            "vielleicht nur noch nicht angekommen. Im Zweifel erst die Synchronisierung " +
+            "abwarten und neu scannen.",
+            "Fehlende Mods aufräumen", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (answer != MessageBoxResult.Yes) return;
+
+        try
+        {
+            var moved = await Task.Run(() => _library.TrashMissing(root.Id)).ConfigureAwait(true);
+            StatusText = $"{moved} fehlende Mod(s) in den Papierkorb verschoben";
+            ShowMissingOnly = false;
+            await RefreshMissingCountAsync().ConfigureAwait(true);
+            RefreshMods();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "TrashMissing failed");
+            MessageBox.Show(ex.Message, "Aufräumen fehlgeschlagen",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     partial void OnSelectedRootChanged(RootInfo? value) => _ = ReloadRootAsync(value);
@@ -371,7 +482,8 @@ public sealed partial class MainViewModel : ObservableObject
         TagsAll = TagMode == TagFilterMode.And ? IncludedTagIds() : Array.Empty<long>(),
         TagsAny = TagMode == TagFilterMode.Or ? IncludedTagIds() : Array.Empty<long>(),
         TagsNone = TagFilters.Where(t => t.State == TagFilterState.Exclude).Select(t => t.Id).ToArray(),
-        OnlyUntagged = OnlyUntagged
+        OnlyUntagged = OnlyUntagged,
+        Missing = ShowMissingOnly ? MissingFilter.Only : MissingFilter.Hide
     };
 
     private long[] IncludedTagIds() =>
@@ -632,9 +744,20 @@ public sealed partial class MainViewModel : ObservableObject
                 catch (Exception ex) { _log.LogError(ex, "Rescan after image drop failed"); }
             }).ContinueWith(_ =>
             {
-                Application.Current.Dispatcher.Invoke(RefreshMods);
+                Application.Current.Dispatcher.Invoke(RefreshAfterScan);
             }, TaskScheduler.Default);
         }
+    }
+
+    /// <summary>
+    /// True for a database timeout at any depth. Checked by type rather than by message so
+    /// it does not depend on Npgsql's wording, and without pulling Npgsql into the UI layer.
+    /// </summary>
+    private static bool IsTimeout(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+            if (e is TimeoutException) return true;
+        return false;
     }
 
     private CancellationTokenSource? _scanCts;
@@ -669,14 +792,49 @@ public sealed partial class MainViewModel : ObservableObject
         {
             var summary = await Task.Run(() => _scanner.Scan(rootId, progress, ct), ct);
             StatusText = $"Scan fertig: {summary.CategoriesSeen} Kat., {summary.ModsSeen} Mods, {summary.FilesSeen} Dateien in {summary.Duration.TotalSeconds:F1}s";
+            if (summary.ModsMarkedMissing > 0)
+                StatusText += $" · {summary.ModsMarkedMissing} nicht mehr im Ordner";
             _log.LogInformation("Rescan: {Mods} mods in {Sec}s",
                 summary.ModsSeen, summary.Duration.TotalSeconds);
             await LoadAsync().ConfigureAwait(true);
+
+            // A scan that found almost nothing is reported instead of acted on: with a
+            // synced folder that is a transfer in progress far more often than a deletion.
+            if (summary.MissingMarkSkipped)
+            {
+                MessageBox.Show(
+                    $"Dieser Scan hat {summary.ModsNotFound} von bisher bekannten Mods nicht " +
+                    "im Ordner gefunden - das ist so viel auf einmal, dass sie NICHT als " +
+                    "fehlend markiert wurden.\n\n" +
+                    "Wahrscheinlich läuft die Synchronisierung noch, oder die Bibliothek " +
+                    "zeigt auf den falschen Ordner. Warte, bis Nextcloud fertig ist, und " +
+                    "scanne dann erneut.",
+                    "Sehr viele Mods fehlen", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
         catch (OperationCanceledException)
         {
             StatusText = "Scan abgebrochen.";
             await LoadAsync().ConfigureAwait(true);
+        }
+        catch (ScanAlreadyRunningException ex)
+        {
+            StatusText = "Scan läuft bereits.";
+            MessageBox.Show(ex.Message, "Scan läuft bereits",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex) when (IsTimeout(ex))
+        {
+            // Npgsql reports a command timeout as "Exception while reading from stream",
+            // which tells the user nothing. It happens when another scan of the same root
+            // is still writing.
+            StatusText = "Zeitüberschreitung beim Scan.";
+            MessageBox.Show(
+                "Die Datenbank hat zu lange nicht geantwortet.\n\n" +
+                "Meist läuft gerade ein zweiter Scan derselben Bibliothek - am anderen PC " +
+                "oder automatisch nach einer Änderung im Ordner. Warte kurz und starte den " +
+                "Scan erneut.",
+                "Scan-Zeitüberschreitung", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         catch (RootNotMappedException ex)
         {

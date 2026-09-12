@@ -399,6 +399,25 @@ internal static class Migrations
             END IF;
         END $$;
         """),
+
+        // v9: remember *when* a mod went missing, and who noticed.
+        //
+        // is_missing alone is a bare flag: it cannot tell "deleted five minutes ago on the
+        // other PC, Nextcloud has not caught up" from "gone for two weeks". With two people
+        // syncing the same folder that difference decides whether a cleanup is safe, so the
+        // timestamp is what the UI offers to filter on before anything gets removed.
+        (9, """
+        ALTER TABLE mods ADD COLUMN IF NOT EXISTS missing_since TIMESTAMPTZ;
+        ALTER TABLE mods ADD COLUMN IF NOT EXISTS missing_by    UUID REFERENCES users(id) ON DELETE SET NULL;
+
+        -- Backfill: mods already flagged missing get a timestamp so they are not treated
+        -- as "just vanished" the moment this ships.
+        UPDATE mods SET missing_since = NOW() WHERE is_missing = TRUE AND missing_since IS NULL;
+
+        -- The missing list is a small slice of a large table.
+        CREATE INDEX IF NOT EXISTS idx_mods_missing
+            ON mods(category_id, missing_since) WHERE is_missing = TRUE AND deleted_at IS NULL;
+        """),
     };
 
     public static int CurrentVersion(NpgsqlConnection conn)

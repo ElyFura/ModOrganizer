@@ -113,6 +113,40 @@ public sealed partial class ModCardViewModel : ObservableObject
     public int TtmpCount => Model.TtmpCount;
     public int ImageCount => Model.ImageCount;
     public bool IsMissing => Model.IsMissing;
+
+    /// <summary>
+    /// How long the folder has been gone. The age is the whole point: "seit heute" is a
+    /// sync that may still be running, "seit 12 Tagen" is a real deletion.
+    /// </summary>
+    public string MissingText
+    {
+        get
+        {
+            if (Model.MissingSince is not { } since) return "nicht im Ordner";
+
+            var days = (int)(DateTimeOffset.UtcNow - since).TotalDays;
+            return days switch
+            {
+                <= 0 => "fehlt seit heute",
+                1    => "fehlt seit gestern",
+                _    => $"fehlt seit {days} Tagen"
+            };
+        }
+    }
+
+    public string MissingTooltip
+    {
+        get
+        {
+            var who = string.IsNullOrWhiteSpace(Model.MissingByName)
+                ? ""
+                : $"\nBemerkt beim Scan von: {Model.MissingByName}";
+            var when = Model.MissingSince is { } s ? s.ToLocalTime().ToString("g") : "unbekannt";
+            return $"Der Ordner dieses Mods wurde beim letzten Scan nicht gefunden.\n" +
+                   $"Zuletzt gesehen: {when}{who}";
+        }
+    }
+
     public bool HasImage => Model.PrimaryImageAbsPath is not null;
 
     /// <summary>

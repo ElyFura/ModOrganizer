@@ -13,6 +13,7 @@ if (args.Length == 0 || args[0] is "-h" or "--help")
     Console.WriteLine("  ModOrganizer.Cli selftest <connection-string>");
     Console.WriteLine("  ModOrganizer.Cli tag      <connection-string> <tag> [<mod-substring>...]");
     Console.WriteLine("  ModOrganizer.Cli untag    <connection-string> <tag> <mod-substring>...");
+    Console.WriteLine("  ModOrganizer.Cli missing  <connection-string> [--purge] [--days N]");
     Console.WriteLine();
     Console.WriteLine("  scan    Scan a root folder into the database");
     Console.WriteLine("  verify    Apply migrations and time every hot query (read-only apart");
@@ -45,6 +46,16 @@ if (args[0] == "tag")
     return args.Length == 3
         ? ListTagged(args[1], args[2])
         : ApplyTag(args[1], args[2], args.Skip(3).ToArray(), remove: false);
+}
+
+if (args[0] == "missing")
+{
+    if (args.Length < 2) { Console.Error.WriteLine("missing needs a connection string"); return 2; }
+    var rest = args.Skip(2).ToArray();
+    var daysArg = rest.SkipWhile(a => a != "--days").Skip(1).FirstOrDefault();
+    return Missing(args[1],
+        purge: rest.Contains("--purge"),
+        olderThanDays: int.TryParse(daysArg, out var d) ? d : 0);
 }
 
 if (args[0] == "roots")
@@ -739,12 +750,25 @@ static int ListRoots(string connectionString)
     var store = new DatabaseStore(new PostgresConnectionFactory(connectionString));
     using var conn = store.Open();
 
-    var rows = conn.Query<(long Id, string Path, string DisplayName, bool Enabled, long Cats, long Mods)>(
+    // Ratings, tags and comments are the work that a DeleteRoot would destroy, so they
+    // belong next to the counts whenever someone is deciding what to clean up.
+    var rows = conn.Query<(long Id, string Path, string DisplayName, bool Enabled,
+                           long Cats, long Mods, long Rated, long Tagged, long Commented)>(
         """
         SELECT r.id AS Id, r.path AS Path, r.display_name AS DisplayName, r.enabled AS Enabled,
                (SELECT COUNT(*) FROM categories c WHERE c.root_id = r.id) AS Cats,
                (SELECT COUNT(*) FROM mods m JOIN categories c ON c.id = m.category_id
-                 WHERE c.root_id = r.id AND m.deleted_at IS NULL) AS Mods
+                 WHERE c.root_id = r.id AND m.deleted_at IS NULL) AS Mods,
+               (SELECT COUNT(*) FROM mods m JOIN categories c ON c.id = m.category_id
+                 WHERE c.root_id = r.id AND m.deleted_at IS NULL AND m.rating > 0) AS Rated,
+               (SELECT COUNT(DISTINCT m.id) FROM mods m
+                  JOIN categories c ON c.id = m.category_id
+                  JOIN mod_tags mt ON mt.mod_id = m.id
+                 WHERE c.root_id = r.id AND m.deleted_at IS NULL) AS Tagged,
+               (SELECT COUNT(DISTINCT m.id) FROM mods m
+                  JOIN categories c ON c.id = m.category_id
+                  JOIN mod_comments cm ON cm.mod_id = m.id
+                 WHERE c.root_id = r.id AND m.deleted_at IS NULL) AS Commented
         FROM roots r ORDER BY r.id
         """).ToList();
 
@@ -754,6 +778,10 @@ static int ListRoots(string connectionString)
         Console.WriteLine($"#{r.Id}  {r.DisplayName}");
         Console.WriteLine($"     path    : {r.Path}   [{here}]");
         Console.WriteLine($"     enabled : {r.Enabled}   Kategorien: {r.Cats}   Mods: {r.Mods}");
+        Console.WriteLine($"     gepflegt: {r.Rated} bewertet, {r.Tagged} getaggt, {r.Commented} kommentiert" +
+                          (r.Rated + r.Tagged + r.Commented == 0
+                              ? "   -> nichts, was beim Loeschen verloren ginge"
+                              : "   -> beim Loeschen weg"));
     }
 
     Console.WriteLine();
@@ -798,6 +826,51 @@ static int ListRoots(string connectionString)
     return 0;
 }
 
+
+/// <summary>
+/// Lists the mods that scans could not find on disk any more, and optionally clears them
+/// into the trash. This is the headless twin of the banner in the gallery.
+/// </summary>
+static int Missing(string connectionString, bool purge, int olderThanDays)
+{
+    var store = new DatabaseStore(new PostgresConnectionFactory(connectionString));
+    store.Initialize();
+
+    var library = new ModLibraryService(store);
+    var roots = library.GetRoots();
+    if (roots.Count == 0) { Console.Error.WriteLine("no roots configured"); return 2; }
+
+    var total = 0;
+    foreach (var root in roots)
+    {
+        var count = library.CountMissing(root.Id);
+        Console.WriteLine($"== #{root.Id} {root.DisplayName} ==  {count} nicht mehr im Ordner");
+        total += count;
+        if (count == 0) continue;
+
+        var gone = library.GetMods(new ModQuery { RootId = root.Id, Missing = MissingFilter.Only });
+        foreach (var m in gone.OrderBy(m => m.CategoryName).ThenBy(m => m.FolderName))
+        {
+            var age = m.MissingSince is { } s
+                ? $"seit {(int)(DateTimeOffset.UtcNow - s).TotalDays}d"
+                : "seit unbekannt";
+            Console.WriteLine($"   {m.CategoryName}/{m.FolderName}  ({age})");
+        }
+
+        if (purge)
+        {
+            var moved = library.TrashMissing(root.Id, olderThanDays);
+            Console.WriteLine($"   -> {moved} in den Papierkorb verschoben" +
+                              (olderThanDays > 0 ? $" (nur aelter als {olderThanDays} Tage)" : ""));
+        }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"gesamt: {total}");
+    if (!purge && total > 0)
+        Console.WriteLine("(Probelauf - mit --purge wandern sie in den Papierkorb)");
+    return 0;
+}
 
 /// <summary>Shows what one specific user's app would load, and can run the auto-adopt.</summary>
 static int RootsAsUser(string connectionString, string who, bool adopt,

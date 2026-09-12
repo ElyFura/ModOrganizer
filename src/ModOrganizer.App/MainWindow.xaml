@@ -79,6 +79,18 @@
                                            FontSize="10" FontWeight="SemiBold" />
                             </Border>
 
+                            <!-- Gone from disk. Shown only in the review list, but marked
+                                 clearly there so nothing gets cleaned up by accident. -->
+                            <Border CornerRadius="8" Padding="7,3"
+                                    Background="#C4761F"
+                                    HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                    Margin="8,0,0,8"
+                                    ToolTip="{Binding MissingTooltip}"
+                                    Visibility="{Binding IsMissing, Converter={StaticResource BoolToVisible}}">
+                                <TextBlock Text="{Binding MissingText}" Foreground="White"
+                                           FontSize="10" FontWeight="SemiBold" />
+                            </Border>
+
                             <!-- Avatar chip: shows last editor of this mod -->
                             <Border Width="28" Height="28" CornerRadius="14"
                                     Background="{Binding UpdatedByBrush}"
@@ -519,6 +531,31 @@
                                            FontSize="11" Margin="0,0,5,0" />
                                 <TextBlock Text="{Binding TagFilterSummary}" Foreground="#C9BEFF"
                                            FontSize="11" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Mods the last scan no longer found. Hidden from the gallery,
+                             but never removed silently: with a synced folder "gone" can
+                             just mean "not synced yet". -->
+                        <Border Background="#3A2A18" CornerRadius="6" Padding="10,6" Margin="0,8,0,0"
+                                BorderBrush="#7A5A28" BorderThickness="1"
+                                HorizontalAlignment="Left"
+                                Visibility="{Binding HasMissing, Converter={StaticResource BoolToVisible}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE7BA;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                           FontSize="13" Foreground="#E8B45A" Margin="0,0,7,0"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding MissingBannerText}" Foreground="#F0D9A8"
+                                           FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                <Button Content="Ansehen" Command="{Binding ReviewMissingCommand}"
+                                        Margin="10,0,0,0" Padding="9,2" FontSize="11"
+                                        Visibility="{Binding ShowMissingOnly, Converter={StaticResource BoolToCollapsed}}" />
+                                <Button Content="Zurück zur Bibliothek" Padding="9,2" FontSize="11"
+                                        Margin="10,0,0,0" Click="ExitMissingView_Click"
+                                        Visibility="{Binding ShowMissingOnly, Converter={StaticResource BoolToVisible}}" />
+                                <Button Content="In den Papierkorb" Command="{Binding TrashMissingCommand}"
+                                        Margin="6,0,0,0" Padding="9,2" FontSize="11"
+                                        ToolTip="Verschiebt die fehlenden Mods in den Papierkorb. Tags, Bewertungen und Kommentare bleiben erhalten." />
                             </StackPanel>
                         </Border>
                     </StackPanel>

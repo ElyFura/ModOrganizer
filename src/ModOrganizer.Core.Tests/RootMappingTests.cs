@@ -1,5 +1,6 @@
 using FluentAssertions;
 using ModOrganizer.Core.Queries;
+using ModOrganizer.Core.Scanning;
 
 namespace ModOrganizer.Core.Tests;
 
@@ -101,5 +102,78 @@ public sealed class RootMappingTests : IDisposable
 
         apply.Should().ContainSingle().Which.RootId.Should().Be(9);
         conflicts.Should().ContainSingle().Which.RootId.Should().Be(1);
+    }
+}
+
+/// <summary>
+/// The guard that keeps a half-synced folder from wiping a shared library out of the
+/// gallery for everyone.
+/// </summary>
+public sealed class MissingGuardTests
+{
+    [Theory]
+    [InlineData(390, 18)]    // a normal cleanup: a handful of mods deleted
+    [InlineData(390, 195)]   // exactly half, still treated as a real deletion
+    [InlineData(10, 10)]     // tiny library: too small to judge, let it through
+    [InlineData(19, 19)]     // just under the size floor
+    [InlineData(0, 0)]       // empty root
+    public void FlagsMissingForPlausibleDeletions(int live, int vanished)
+    {
+        ModScanner.LooksLikeIncompleteSync(live, vanished).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(390, 196)]   // more than half of a real library
+    [InlineData(390, 390)]   // the folder came up empty - sync not started
+    [InlineData(20, 11)]
+    public void RefusesToFlagWhenMostOfTheLibraryIsGone(int live, int vanished)
+    {
+        ModScanner.LooksLikeIncompleteSync(live, vanished).Should().BeTrue();
+    }
+}
+
+/// <summary>
+/// The gate that stops the folder watcher from stacking scans on one root - the failure
+/// that surfaced as Npgsql's "Exception while reading from stream".
+/// </summary>
+public sealed class ScanGateTests
+{
+    [Fact]
+    public void SecondEntryOnTheSameRootIsRefused()
+    {
+        var gate = new ScanGate();
+
+        gate.TryEnter(7).Should().BeTrue();
+        gate.TryEnter(7).Should().BeFalse();
+        gate.IsBusy(7).Should().BeTrue();
+
+        gate.Exit(7);
+
+        gate.IsBusy(7).Should().BeFalse();
+        gate.TryEnter(7).Should().BeTrue();
+    }
+
+    [Fact]
+    public void DifferentRootsScanIndependently()
+    {
+        var gate = new ScanGate();
+
+        gate.TryEnter(1).Should().BeTrue();
+        gate.TryEnter(2).Should().BeTrue();
+        gate.IsBusy(3).Should().BeFalse();
+    }
+
+    [Fact]
+    public void OnlyOneOfManyThreadsGetsIn()
+    {
+        var gate = new ScanGate();
+        var winners = 0;
+
+        Parallel.For(0, 64, _ =>
+        {
+            if (gate.TryEnter(42)) Interlocked.Increment(ref winners);
+        });
+
+        winners.Should().Be(1);
     }
 }

@@ -49,6 +49,13 @@ public sealed class ModCard
     public int TtmpCount { get; set; }
     public int ImageCount { get; set; }
     public bool IsMissing { get; set; }
+
+    /// <summary>When a scan first failed to find this mod on disk.</summary>
+    public DateTimeOffset? MissingSince { get; set; }
+
+    /// <summary>Who ran the scan that noticed. With two PCs this says *where* it is gone.</summary>
+    public string? MissingByName { get; set; }
+
     public int Rating { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -87,6 +94,22 @@ public sealed record ModQuery
 
     /// <summary>True when no tag has been assigned at all.</summary>
     public bool OnlyUntagged { get; init; }
+
+    /// <summary>How to treat mods the last scan did not find on disk.</summary>
+    public MissingFilter Missing { get; init; } = MissingFilter.Hide;
+}
+
+/// <summary>What the gallery does with mods that are flagged as gone from disk.</summary>
+public enum MissingFilter
+{
+    /// <summary>The default: a mod that is no longer on disk is not part of the library.</summary>
+    Hide,
+
+    /// <summary>Show them alongside the rest, marked.</summary>
+    Include,
+
+    /// <summary>Show nothing else - the review list before a cleanup.</summary>
+    Only
 }
 
 public sealed class ModLibraryService
@@ -186,13 +209,18 @@ public sealed class ModLibraryService
         WITH target AS (
             SELECT m.id, m.category_id, m.folder_name, m.display_name, m.rating,
                    m.created_at, m.updated_at, m.last_viewed_at,
-                   m.folder_ctime, m.folder_mtime, m.is_missing, m.updated_by,
+                   m.folder_ctime, m.folder_mtime, m.is_missing,
+                   m.missing_since, m.missing_by, m.updated_by,
                    c.name AS cat_name, c.root_id, c.sort_order
             FROM mods m
             JOIN categories c ON c.id = m.category_id
             WHERE c.root_id = @r
               AND m.deleted_at IS NULL
               AND (@cat::bigint IS NULL OR m.category_id = @cat::bigint)
+              -- 0 = hide gone-from-disk mods, 1 = include them, 2 = only them.
+              AND (@missing::int = 1
+                   OR (@missing::int = 0 AND m.is_missing = FALSE)
+                   OR (@missing::int = 2 AND m.is_missing = TRUE))
               AND (@minRating::int = 0 OR m.rating >= @minRating::int)
               AND (@qLike::text IS NULL
                    OR m.folder_name ILIKE @qLike::text ESCAPE '\'
@@ -248,6 +276,8 @@ public sealed class ModLibraryService
                COALESCE(a.total_size, 0) AS TotalSizeBytes,
                pv.cache_path AS PmpPreviewCache,
                t.is_missing AS IsMissing,
+               t.missing_since AS MissingSince,
+               COALESCE(mu.display_name, mu.email) AS MissingByName,
                COALESCE(uu.display_name, uu.email) AS UpdatedByName,
                uu.color_hex AS UpdatedByColor
         FROM target t
@@ -268,6 +298,7 @@ public sealed class ModLibraryService
             LIMIT 1
         ) pv ON TRUE
         LEFT JOIN users uu ON uu.id = t.updated_by
+        LEFT JOIN users mu ON mu.id = t.missing_by
         ORDER BY {OrderByFor(sort)};
 
         {TargetCte}
@@ -287,7 +318,8 @@ public sealed class ModLibraryService
         tagsAll = q.TagsAll.Distinct().ToArray(),
         tagsAny = q.TagsAny.Distinct().ToArray(),
         tagsNone = q.TagsNone.Distinct().ToArray(),
-        onlyUntagged = q.OnlyUntagged
+        onlyUntagged = q.OnlyUntagged,
+        missing = (int)q.Missing
     };
 
     /// <summary>
@@ -385,6 +417,10 @@ public sealed class ModLibraryService
                 TtmpCount = row.TtmpCount,
                 ImageCount = row.ImageCount,
                 IsMissing = row.IsMissing,
+                MissingSince = row.MissingSince is { } ms
+                    ? new DateTimeOffset(DateTime.SpecifyKind(ms, DateTimeKind.Utc))
+                    : null,
+                MissingByName = row.MissingByName,
                 Rating = row.Rating,
                 CreatedAt = string.IsNullOrEmpty(row.FolderCreatedAt) ? ParseDate(row.CreatedAt) : ParseDate(row.FolderCreatedAt),
                 UpdatedAt = string.IsNullOrEmpty(row.FolderUpdatedAt) ? ParseDate(row.UpdatedAt) : ParseDate(row.FolderUpdatedAt),
@@ -396,6 +432,65 @@ public sealed class ModLibraryService
             });
         }
         return cards;
+    }
+
+    /// <summary>
+    /// How many mods of this root the last scan could not find on disk. Cheap enough to
+    /// run on every gallery refresh, which is what lets the banner stay honest.
+    /// </summary>
+    public int CountMissing(long rootId)
+    {
+        using var conn = _store.Open();
+        return conn.ExecuteScalar<int>(MissingCountSql, new { r = rootId });
+    }
+
+    public async Task<int> CountMissingAsync(long rootId, CancellationToken ct = default)
+    {
+        await using var conn = await _store.OpenAsync(ct).ConfigureAwait(false);
+        return await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+            MissingCountSql, new { r = rootId }, cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    private const string MissingCountSql =
+        """
+        SELECT COUNT(*)::int
+        FROM mods m
+        JOIN categories c ON c.id = m.category_id
+        WHERE c.root_id = @r AND m.is_missing = TRUE AND m.deleted_at IS NULL
+        """;
+
+    /// <summary>
+    /// Moves the gone-from-disk mods of a root into the trash, where they stay restorable.
+    /// The folder itself is already gone, so there is nothing to delete on disk - only the
+    /// database row changes, exactly as a normal soft delete would.
+    ///
+    /// <paramref name="olderThanDays"/> guards the sync case: a mod that vanished minutes
+    /// ago may just be a Nextcloud transfer in flight, so the caller can insist on some
+    /// age before anything is cleaned up.
+    /// </summary>
+    public int TrashMissing(long rootId, int olderThanDays = 0, IEnumerable<long>? onlyIds = null)
+    {
+        using var conn = _store.Open();
+        return conn.Execute(
+            """
+            UPDATE mods m SET deleted_at = @t, is_missing = FALSE, updated_at = @t
+            FROM categories c
+            WHERE c.id = m.category_id
+              AND c.root_id = @r
+              AND m.is_missing = TRUE
+              AND m.deleted_at IS NULL
+              AND (@ids::bigint[] IS NULL OR m.id = ANY(@ids::bigint[]))
+              AND (@days::int = 0
+                   OR (m.missing_since IS NOT NULL
+                       AND m.missing_since <= NOW() - make_interval(days => @days::int)))
+            """,
+            new
+            {
+                r = rootId,
+                t = DateTimeOffset.UtcNow.ToString("o"),
+                days = olderThanDays,
+                ids = onlyIds?.Distinct().ToArray()
+            });
     }
 
     public IReadOnlyList<ModCard> GetDeletedMods()
@@ -514,6 +609,8 @@ public sealed class ModLibraryService
         public int ImageCount { get; set; }
         public long TotalSizeBytes { get; set; }
         public bool IsMissing { get; set; }
+        public DateTime? MissingSince { get; set; }
+        public string? MissingByName { get; set; }
         public int Rating { get; set; }
         public string CreatedAt { get; set; } = "";
         public string UpdatedAt { get; set; } = "";

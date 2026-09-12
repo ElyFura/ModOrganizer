@@ -38,6 +38,13 @@ public sealed class ModScanner
         _log = log ?? NullLogger<ModScanner>.Instance;
     }
 
+    /// <summary>
+    /// Bulk statements move six-figure row counts over a WAN link, so they get their own
+    /// budget. The 30 s default is right for the gallery, where a hang has to surface
+    /// fast, and far too short here.
+    /// </summary>
+    private const int BulkCommandTimeoutSeconds = 300;
+
     // ---------------- filesystem snapshot ----------------
 
     private sealed record DiskFile(string Rel, string AbsPath, ModFileKind Kind, long Size, string Mtime);
@@ -46,7 +53,31 @@ public sealed class ModScanner
 
     private sealed record DiskCategory(string Name, string AbsPath, List<DiskMod> Mods);
 
+    /// <summary>
+    /// One scan per root at a time. The folder watcher fires every couple of seconds while
+    /// Nextcloud syncs, and a scan of a large library runs for minutes, so without this the
+    /// scans stack up and block each other on the same rows.
+    /// </summary>
+    private static readonly ScanGate Gate = new();
+
+    /// <summary>True while a scan of this root is running in this process.</summary>
+    public static bool IsScanning(long rootId) => Gate.IsBusy(rootId);
+
     public ScanSummary Scan(long rootId, IProgress<ScanProgress>? progress = null, CancellationToken ct = default)
+    {
+        if (!Gate.TryEnter(rootId)) throw new ScanAlreadyRunningException(rootId);
+
+        try
+        {
+            return ScanCore(rootId, progress, ct);
+        }
+        finally
+        {
+            Gate.Exit(rootId);
+        }
+    }
+
+    private ScanSummary ScanCore(long rootId, IProgress<ScanProgress>? progress, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
         using var conn = _store.Open();
@@ -77,8 +108,18 @@ public sealed class ModScanner
         var filesSeen = disk.Sum(c => c.Mods.Sum(m => m.Files.Count));
         var modsSeen = disk.Sum(c => c.Mods.Count);
 
-        // 2. Reconcile. One transaction, but now it holds only a handful of statements
-        //    instead of staying open for the entire filesystem walk.
+        // 2. Work out what needs hashing and do it BEFORE any transaction is open.
+        //
+        //    Hashing reads whole .pmp/.ttmp2 archives, and on a Nextcloud-synced drive a
+        //    single archive can take a second or more. Doing that inside the write
+        //    transaction kept a session idle-in-transaction for 25 minutes on a 1200-file
+        //    library, held locks on every row of the root, and made a second scan of the
+        //    same root (the other user, or this app's own folder watcher) fail with
+        //    "Exception while reading from stream" once the 30 s command timeout expired.
+        var known = ReadKnownFiles(conn, rootId, ct);
+        var hashes = ComputeHashes(disk, known, progress, ct, out var hashesComputed);
+
+        // 3. Reconcile. Every write in one transaction, and nothing slow inside it.
         using var tx = conn.BeginTransaction();
 
         var categoryIds = SyncCategories(conn, tx, rootId, disk, ct);
@@ -97,18 +138,27 @@ public sealed class ModScanner
             }
         }
 
-        var hashesComputed = SyncFiles(conn, tx, resolved, progress, ct);
+        SyncFiles(conn, tx, resolved, known, hashes, ct);
 
-        InspectNewPmps(conn, tx, resolved, ct);
+        var missing = MarkMissingMods(conn, tx, rootId, modIds.Values);
 
-        var modsMissing = MarkMissingMods(conn, tx, rootId, modIds.Values);
-        var catsMissing = MarkMissingCategories(conn, tx, rootId, categoryIds.Values);
+        // If the mod-level check refused to flag, the category-level one must not flag
+        // either — otherwise a half-synced root loses its whole category list.
+        var catsMissing = missing.Skipped
+            ? 0
+            : MarkMissingCategories(conn, tx, rootId, categoryIds.Values);
 
         tx.Commit();
 
+        // 4. PMP metadata last, outside the transaction, for the same reason: inspecting
+        //    an archive means unzipping it. A failure here costs nothing - the next scan
+        //    picks up whatever still has no metadata row.
+        InspectNewPmps(conn, resolved, ct);
+
         return new ScanSummary(
             disk.Count, modsSeen, filesSeen, hashesComputed,
-            catsMissing, modsMissing, sw.Elapsed);
+            catsMissing, missing.Marked, sw.Elapsed,
+            missing.Vanished, missing.Skipped);
     }
 
     private static List<DiskCategory> ReadFromDisk(
@@ -321,6 +371,8 @@ public sealed class ModScanner
                      AS d(cat, name, ctime, mtime)
                 ON CONFLICT (category_id, folder_name) DO UPDATE SET
                     is_missing = FALSE,
+                    missing_since = NULL,
+                    missing_by = NULL,
                     deleted_at = NULL,
                     folder_ctime = EXCLUDED.folder_ctime,
                     folder_mtime = EXCLUDED.folder_mtime,
@@ -345,6 +397,8 @@ public sealed class ModScanner
                 """
                 UPDATE mods m SET
                     is_missing = FALSE,
+                    missing_since = NULL,
+                    missing_by = NULL,
                     deleted_at = NULL,
                     folder_ctime = d.ctime,
                     folder_mtime = d.mtime,
@@ -366,99 +420,172 @@ public sealed class ModScanner
 
     // ---------------- files ----------------
 
-    private int SyncFiles(
-        NpgsqlConnection conn, NpgsqlTransaction tx,
-        List<(long ModId, DiskMod Mod)> resolved,
-        IProgress<ScanProgress>? progress,
-        CancellationToken ct)
+    /// <summary>Key of a file as it exists independently of database ids.</summary>
+    private readonly record struct FileKey(string Category, string Mod, string Rel);
+
+    private readonly record struct KnownFile(long Size, string? Mtime, long? Hash);
+
+    /// <summary>
+    /// The root's current file state, keyed by path rather than by mod id, so it can be
+    /// read before the mods are synced - which is what lets hashing happen outside the
+    /// write transaction.
+    /// </summary>
+    private static Dictionary<FileKey, KnownFile> ReadKnownFiles(
+        NpgsqlConnection conn, long rootId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
-        var modIdArray = resolved.Select(r => r.ModId).Distinct().ToArray();
-        if (modIdArray.Length == 0) return 0;
+        var rows = conn.Query<(string Cat, string Mod, string Rel, long Size, string? Mtime, long? Hash)>(
+            new CommandDefinition(
+                """
+                SELECT c.name AS Cat, m.folder_name AS Mod, f.relative_path AS Rel,
+                       f.size_bytes AS Size, f.mtime AS Mtime, f.xxhash64 AS Hash
+                FROM mod_files f
+                JOIN mods m ON m.id = f.mod_id
+                JOIN categories c ON c.id = m.category_id
+                WHERE c.root_id = @r
+                """,
+                new { r = rootId },
+                commandTimeout: BulkCommandTimeoutSeconds,
+                cancellationToken: ct));
 
-        // One SELECT for every file of every mod in this root.
-        var existingRows = conn.Query<(long ModId, string Rel, long Size, string? Mtime, long? Hash)>(
-            """
-            SELECT mod_id AS ModId, relative_path AS Rel, size_bytes AS Size,
-                   mtime AS Mtime, xxhash64 AS Hash
-            FROM mod_files WHERE mod_id = ANY(@ids)
-            """, new { ids = modIdArray }, tx).ToList();
+        var map = new Dictionary<FileKey, KnownFile>();
+        foreach (var r in rows)
+            map[new FileKey(r.Cat, r.Mod, r.Rel)] = new KnownFile(r.Size, r.Mtime, r.Hash);
+        return map;
+    }
 
-        var existing = new Dictionary<(long, string), (long Size, string? Mtime, long? Hash)>();
-        foreach (var r in existingRows)
-            existing[(r.ModId, r.Rel)] = (r.Size, r.Mtime, r.Hash);
+    /// <summary>
+    /// Hashes every archive whose size or timestamp changed, plus any that never got a
+    /// hash. Runs with no transaction open and no database connection in use.
+    /// </summary>
+    private static Dictionary<string, long?> ComputeHashes(
+        List<DiskCategory> disk, Dictionary<FileKey, KnownFile> known,
+        IProgress<ScanProgress>? progress, CancellationToken ct, out int hashesComputed)
+    {
+        var todo = new List<DiskFile>();
 
-        // Flatten disk state and pair each file with its mod id.
-        var diskPairs = new List<(long ModId, DiskFile File)>();
-        var present = new HashSet<(long, string)>();
-
-        foreach (var (modId, mod) in resolved)
+        foreach (var category in disk)
         {
-            foreach (var f in mod.Files)
+            foreach (var mod in category.Mods)
             {
-                diskPairs.Add((modId, f));
-                present.Add((modId, f.Rel));
+                foreach (var file in mod.Files)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (!FileClassifier.ShouldHash(file.Kind)) continue;
+
+                    known.TryGetValue(new FileKey(category.Name, mod.FolderName, file.Rel), out var prev);
+                    var unchanged = prev.Mtime is not null && prev.Size == file.Size && prev.Mtime == file.Mtime;
+
+                    if (!unchanged || prev.Hash is null) todo.Add(file);
+                }
             }
         }
 
-        // Decide what needs hashing, then hash in parallel — this is pure disk/CPU work
-        // and used to run strictly one file at a time.
-        var needsHash = new List<(long ModId, DiskFile File)>();
+        var result = new Dictionary<string, long?>();
+        hashesComputed = 0;
+        if (todo.Count == 0) return result;
+
+        var bag = new ConcurrentBag<(string Path, long? Hash)>();
+        var computed = 0;
+        var done = 0;
+
+        Parallel.ForEach(todo,
+            new ParallelOptions
+            {
+                CancellationToken = ct,
+                MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount)
+            },
+            file =>
+            {
+                long? hash = null;
+                try { if (File.Exists(file.AbsPath)) hash = ComputeXxHash64(file.AbsPath); }
+                catch { /* unreadable file keeps a null hash */ }
+
+                if (hash.HasValue) Interlocked.Increment(ref computed);
+                bag.Add((file.AbsPath, hash));
+
+                var n = Interlocked.Increment(ref done);
+                if (n % 16 == 0)
+                    progress?.Report(new ScanProgress("Hashing", file.Rel, n, todo.Count, n));
+            });
+
+        hashesComputed = computed;
+        foreach (var (path, hash) in bag) result[path] = hash;
+        return result;
+    }
+
+    /// <summary>
+    /// Writes the file rows. Pure database work: everything expensive already happened in
+    /// <see cref="ComputeHashes"/> before the transaction was opened.
+    /// </summary>
+    private static void SyncFiles(
+        NpgsqlConnection conn, NpgsqlTransaction tx,
+        List<(long ModId, DiskMod Mod)> resolved,
+        Dictionary<FileKey, KnownFile> known,
+        Dictionary<string, long?> hashes,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (resolved.Count == 0) return;
+
+        // The category name is needed to look a file up in `known`, and `resolved` only
+        // carries the mod folder, so rebuild the pairing from the mod's own path.
         var upsert = new List<(long ModId, DiskFile File, long? Hash)>();
+        var present = new HashSet<(long, string)>();
+        var modKeys = new Dictionary<long, (string Category, string Mod)>();
 
-        foreach (var (modId, file) in diskPairs)
+        foreach (var (modId, mod) in resolved)
         {
-            ct.ThrowIfCancellationRequested();
-            existing.TryGetValue((modId, file.Rel), out var prev);
-            var unchanged = prev.Mtime is not null && prev.Size == file.Size && prev.Mtime == file.Mtime;
+            var categoryName = Path.GetFileName(Path.GetDirectoryName(mod.AbsPath)) ?? "";
+            modKeys[modId] = (categoryName, mod.FolderName);
 
-            if (unchanged && !(FileClassifier.ShouldHash(file.Kind) && prev.Hash is null))
-                continue; // nothing to write for this file
+            foreach (var file in mod.Files)
+            {
+                ct.ThrowIfCancellationRequested();
+                present.Add((modId, file.Rel));
 
-            if (FileClassifier.ShouldHash(file.Kind) && (!unchanged || prev.Hash is null))
-                needsHash.Add((modId, file));
-            else
-                upsert.Add((modId, file, unchanged ? prev.Hash : null));
+                known.TryGetValue(new FileKey(categoryName, mod.FolderName, file.Rel), out var prev);
+                var unchanged = prev.Mtime is not null && prev.Size == file.Size && prev.Mtime == file.Mtime;
+
+                // Presence in the dictionary is the signal, not the value: a file that was
+                // hashed but could not be read maps to null, and must overwrite the stale
+                // hash rather than keep it.
+                var rehashed = hashes.TryGetValue(file.AbsPath, out var freshHash);
+
+                // Nothing to write when the file is untouched and already carries whatever
+                // hash it is supposed to have.
+                if (unchanged && !rehashed) continue;
+
+                upsert.Add((modId, file, rehashed ? freshHash : prev.Hash));
+            }
         }
-
-        var hashed = new ConcurrentBag<(long ModId, DiskFile File, long? Hash)>();
-        var hashesComputed = 0;
-
-        if (needsHash.Count > 0)
-        {
-            var done = 0;
-            Parallel.ForEach(needsHash,
-                new ParallelOptions
-                {
-                    CancellationToken = ct,
-                    MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount)
-                },
-                item =>
-                {
-                    long? hash = null;
-                    try { if (File.Exists(item.File.AbsPath)) hash = ComputeXxHash64(item.File.AbsPath); }
-                    catch { /* unreadable file keeps a null hash */ }
-
-                    if (hash.HasValue) Interlocked.Increment(ref hashesComputed);
-                    hashed.Add((item.ModId, item.File, hash));
-
-                    var n = Interlocked.Increment(ref done);
-                    if (n % 16 == 0)
-                        progress?.Report(new ScanProgress("Hashing", item.File.Rel, n, needsHash.Count, n));
-                });
-        }
-
-        upsert.AddRange(hashed);
 
         if (upsert.Count > 0)
             BulkUpsertModFiles(conn, tx, upsert);
 
-        // Prune only rows that really vanished; usually none, so usually no statement.
-        var stale = existing.Keys.Where(k => !present.Contains(k)).ToList();
+        // Prune only rows that really vanished, and only for mods still on disk: a mod
+        // that is merely flagged missing keeps its file rows.
+        var knownByMod = new Dictionary<(string, string), List<string>>();
+        foreach (var key in known.Keys)
+        {
+            var bucket = (key.Category, key.Mod);
+            if (!knownByMod.TryGetValue(bucket, out var list))
+                knownByMod[bucket] = list = new List<string>();
+            list.Add(key.Rel);
+        }
+
+        var stale = new List<(long ModId, string Rel)>();
+        foreach (var (modId, key) in modKeys)
+        {
+            if (!knownByMod.TryGetValue((key.Category, key.Mod), out var rels)) continue;
+            foreach (var rel in rels)
+                if (!present.Contains((modId, rel))) stale.Add((modId, rel));
+        }
+
         if (stale.Count > 0)
         {
-            conn.Execute(
+            conn.Execute(new CommandDefinition(
                 """
                 DELETE FROM mod_files f
                 USING unnest(@ids::bigint[], @rels::text[]) AS d(mod_id, rel)
@@ -466,12 +593,11 @@ public sealed class ModScanner
                 """,
                 new
                 {
-                    ids = stale.Select(s => s.Item1).ToArray(),
-                    rels = stale.Select(s => s.Item2).ToArray()
-                }, tx);
+                    ids = stale.Select(x => x.ModId).ToArray(),
+                    rels = stale.Select(x => x.Rel).ToArray()
+                },
+                tx, commandTimeout: BulkCommandTimeoutSeconds, cancellationToken: ct));
         }
-
-        return hashesComputed;
     }
 
     private static void BulkUpsertModFiles(
@@ -507,6 +633,7 @@ public sealed class ModScanner
         cmd.Parameters.Add(hashParam);
 
         cmd.Parameters.AddWithValue("mtimes", rows.Select(r => r.File.Mtime).ToArray());
+        cmd.CommandTimeout = BulkCommandTimeoutSeconds;
         cmd.ExecuteNonQuery();
     }
 
@@ -518,7 +645,7 @@ public sealed class ModScanner
     /// that nothing had changed.
     /// </summary>
     private void InspectNewPmps(
-        NpgsqlConnection conn, NpgsqlTransaction tx,
+        NpgsqlConnection conn,
         List<(long ModId, DiskMod Mod)> resolved, CancellationToken ct)
     {
         var modIdArray = resolved.Select(r => r.ModId).Distinct().ToArray();
@@ -531,7 +658,7 @@ public sealed class ModScanner
             LEFT JOIN pmp_meta pm ON pm.mod_file_id = f.id
             WHERE f.mod_id = ANY(@ids) AND f.kind = @kind AND pm.mod_file_id IS NULL
             """,
-            new { ids = modIdArray, kind = (int)ModFileKind.Pmp }, tx).ToList();
+            new { ids = modIdArray, kind = (int)ModFileKind.Pmp }).ToList();
 
         if (todo.Count == 0) return;
 
@@ -545,26 +672,85 @@ public sealed class ModScanner
             if (!modDirs.TryGetValue(f.ModId, out var modDir)) continue;
 
             var abs = Path.Combine(modDir, f.Rel.Replace('/', Path.DirectorySeparatorChar));
-            var result = _pmpInspector.Inspect(abs, f.FileId);
+
+            PmpMetaResult? result;
+            try
+            {
+                // Unzipping happens here, with no transaction open.
+                result = _pmpInspector.Inspect(abs, f.FileId);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "PMP inspection failed for {Path}", abs);
+                continue;
+            }
+
             if (result is null) continue;
 
-            _pmpInspector.PersistToDb(conn, tx, f.FileId, result);
+            // One short transaction per archive: the metadata for a single file is written
+            // all-or-nothing, but a slow archive never blocks anyone else's scan.
+            try
+            {
+                using var metaTx = conn.BeginTransaction();
+                _pmpInspector.PersistToDb(conn, metaTx, f.FileId, result);
+                metaTx.Commit();
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Storing PMP metadata failed for {Path}", abs);
+            }
         }
     }
 
     // ---------------- missing bookkeeping ----------------
 
-    private static int MarkMissingMods(
+    /// <summary>What one scan decided about the mods it did not find on disk.</summary>
+    private readonly record struct MissingResult(int Marked, int Vanished, bool Skipped);
+
+    /// <summary>
+    /// A scan that suddenly cannot find most of the library is far more likely to be a
+    /// half-synced Nextcloud folder (or the wrong folder mapped) than a real mass
+    /// deletion. Flagging in that case would hide a working library from BOTH users,
+    /// since is_missing is shared, so nothing is flagged and the caller reports it.
+    /// </summary>
+    public static bool LooksLikeIncompleteSync(int liveInDb, int vanished) =>
+        liveInDb >= 20 && vanished > liveInDb / 2;
+
+    private MissingResult MarkMissingMods(
         NpgsqlConnection conn, NpgsqlTransaction tx, long rootId, IEnumerable<long> seenModIds)
     {
         var seen = seenModIds.Distinct().ToArray();
-        return conn.Execute(
+
+        var counts = conn.QuerySingle<(int Live, int Vanished)>(
             """
-            UPDATE mods SET is_missing=TRUE
+            SELECT COUNT(*)::int AS Live,
+                   COUNT(*) FILTER (WHERE NOT (id = ANY(@seen)))::int AS Vanished
+            FROM mods
+            WHERE deleted_at IS NULL
+              AND category_id IN (SELECT id FROM categories WHERE root_id=@r)
+            """, new { r = rootId, seen }, tx);
+
+        if (LooksLikeIncompleteSync(counts.Live, counts.Vanished))
+        {
+            _log.LogWarning(
+                "Root {Root}: {Vanished} of {Live} mods not found on disk - not flagging, " +
+                "this looks like an incomplete sync rather than a deletion.",
+                rootId, counts.Vanished, counts.Live);
+            return new MissingResult(0, counts.Vanished, Skipped: true);
+        }
+
+        // missing_since is set once and then left alone, so "gone for two weeks" stays
+        // distinguishable from "gone since the last scan" across any number of scans.
+        var marked = conn.Execute(
+            """
+            UPDATE mods SET is_missing=TRUE, missing_since=NOW(), missing_by=@u
             WHERE is_missing=FALSE
+              AND deleted_at IS NULL
               AND category_id IN (SELECT id FROM categories WHERE root_id=@r)
               AND NOT (id = ANY(@seen))
-            """, new { r = rootId, seen }, tx);
+            """, new { r = rootId, seen, u = _user?.UserId }, tx);
+
+        return new MissingResult(marked, counts.Vanished, Skipped: false);
     }
 
     private static int MarkMissingCategories(

@@ -228,14 +228,14 @@ public partial class App : Application
         }
 
         var watcher = _host.Services.GetRequiredService<RootWatcher>();
-        watcher.RescanCompleted += (_, _) => Dispatcher.Invoke(mainVm.RefreshMods);
+        watcher.RescanCompleted += (_, _) => Dispatcher.Invoke(mainVm.RefreshAfterScan);
         watcher.Start();
 
         // Phase C: realtime sync — partner's DB changes pushed to our UI
         if (supabase.IsAuthenticated)
         {
             var hub = _host.Services.GetRequiredService<RealtimeHub>();
-            hub.OnAnyChange(() => Dispatcher.Invoke(mainVm.RefreshMods));
+            hub.OnAnyChange(() => Dispatcher.Invoke(mainVm.RefreshAfterScan));
 
             // Phase 4A: @mention broadcast listener
             var mentions = _host.Services.GetRequiredService<MentionBroadcaster>();
