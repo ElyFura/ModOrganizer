@@ -61,17 +61,17 @@ public partial class MainWindow : Window
 
         var menu = new ContextMenu();
 
-        var openItem = new MenuItem { Header = "Open details" };
+        var openItem = new MenuItem { Header = "Details öffnen" };
         openItem.Click += (_, _) => vm.OpenDetailCommand.Execute(card);
         menu.Items.Add(openItem);
 
-        var explorerItem = new MenuItem { Header = "Show in Explorer" };
+        var explorerItem = new MenuItem { Header = "Im Explorer anzeigen" };
         explorerItem.Click += (_, _) => OpenModInExplorer(card);
         menu.Items.Add(explorerItem);
 
         menu.Items.Add(new Separator());
 
-        var moveHeader = new MenuItem { Header = "Move to category" };
+        var moveHeader = new MenuItem { Header = "In Kategorie verschieben" };
         foreach (var cat in vm.Categories)
         {
             if (cat.Id == card.Model.CategoryId) continue;

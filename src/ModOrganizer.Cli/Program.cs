@@ -48,6 +48,18 @@ if (args[0] == "tag")
         : ApplyTag(args[1], args[2], args.Skip(3).ToArray(), remove: false);
 }
 
+if (args[0] == "profile")
+{
+    if (args.Length < 4 || args[2] != "--as")
+    {
+        Console.Error.WriteLine("profile <connection-string> --as <user> [--name <name>]");
+        return 2;
+    }
+    var rest = args.Skip(4).ToArray();
+    var newName = rest.SkipWhile(a => a != "--name").Skip(1).FirstOrDefault();
+    return Profile(args[1], args[3], newName);
+}
+
 if (args[0] == "missing")
 {
     if (args.Length < 2) { Console.Error.WriteLine("missing needs a connection string"); return 2; }
@@ -880,6 +892,45 @@ static int Missing(string connectionString, bool purge, int olderThanDays)
     Console.WriteLine($"gesamt: {total}");
     if (!purge && total > 0)
         Console.WriteLine("(Probelauf - mit --purge wandern sie in den Papierkorb)");
+    return 0;
+}
+
+/// <summary>Reads, and optionally sets, the name a user appears under in the shared library.</summary>
+static int Profile(string connectionString, string who, string? newName)
+{
+    var store = new DatabaseStore(new PostgresConnectionFactory(connectionString));
+    store.Initialize();
+
+    Guid uid;
+    using (var conn = store.Open())
+    {
+        var row = conn.QuerySingleOrDefault<(Guid Id, string? Name)>(
+            """
+            SELECT id AS Id, COALESCE(display_name, email) AS Name FROM users
+            WHERE id::text = @w OR email = @w OR display_name = @w
+            """, new { w = who });
+        if (row.Id == Guid.Empty) { Console.Error.WriteLine($"kein Benutzer '{who}'"); return 2; }
+        uid = row.Id;
+    }
+
+    var svc = new UserProfileService(store, new FakeUser(uid, who));
+
+    if (newName is not null)
+    {
+        svc.SetDisplayName(newName);
+        Console.WriteLine($"Anzeigename gesetzt auf: {newName}");
+    }
+
+    var me = svc.GetCurrent();
+    if (me is null) { Console.Error.WriteLine("kein Profil gefunden"); return 1; }
+
+    Console.WriteLine($"  id      : {me.Id}");
+    Console.WriteLine($"  email   : {me.Email}");
+    Console.WriteLine($"  anzeige : {me.DisplayName}");
+    Console.WriteLine($"  farbe   : {me.ColorHex ?? "-"}");
+    Console.WriteLine(string.Equals(me.DisplayName, me.Email, StringComparison.OrdinalIgnoreCase)
+        ? "  -> zeigt noch die E-Mail-Adresse"
+        : "  -> eigener Name gesetzt");
     return 0;
 }
 

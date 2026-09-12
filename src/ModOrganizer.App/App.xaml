@@ -598,6 +598,43 @@
                 </Setter>
             </Style>
 
+            <!-- ========== ToolTip ==========
+                 Ohne eigene Vorlage nimmt WPF die Systemfarben: weißer Kasten, während
+                 die App überall helle Schrift vererbt - der Text war damit unsichtbar.
+            -->
+            <Style TargetType="ToolTip">
+                <Setter Property="Foreground" Value="{StaticResource Text}" />
+                <Setter Property="Background" Value="{StaticResource Bg2}" />
+                <Setter Property="BorderBrush" Value="{StaticResource Border1}" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="MaxWidth" Value="420" />
+                <Setter Property="HasDropShadow" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ToolTip">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1" CornerRadius="6"
+                                    Padding="10,7">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.55" />
+                                </Border.Effect>
+                                <!-- Lange Hinweise umbrechen statt in eine Zeile quetschen. -->
+                                <ContentPresenter TextBlock.Foreground="{TemplateBinding Foreground}"
+                                                  TextBlock.FontSize="{TemplateBinding FontSize}">
+                                    <ContentPresenter.Resources>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="TextWrapping" Value="Wrap" />
+                                            <Setter Property="Foreground" Value="{StaticResource Text}" />
+                                        </Style>
+                                    </ContentPresenter.Resources>
+                                </ContentPresenter>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <!-- ========== Context Menu ========== -->
             <Style TargetType="ContextMenu">
                 <Setter Property="Background" Value="{StaticResource Bg2}" />
@@ -605,6 +642,37 @@
                 <Setter Property="BorderBrush" Value="{StaticResource Border1}" />
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="Padding" Value="4" />
+                <Setter Property="HasDropShadow" Value="False" />
+                <!--
+                    Eigene Vorlage statt der von WPF. Die Standardvorlage wickelt die
+                    Einträge in einen MenuScrollViewer mit CanContentScroll="True" — der
+                    hat die Einträge hier nach links verschoben, sodass vorne ein bis zwei
+                    Buchstaben abgeschnitten waren. Die Untermenüs benutzen schon immer
+                    genau diesen einfachen Aufbau und waren nie betroffen.
+                -->
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ContextMenu">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}"
+                                    CornerRadius="6" MinWidth="180">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.6" />
+                                </Border.Effect>
+                                <!-- Deckel plus Scrollen, damit ein langes Menü nicht
+                                     aus dem Bildschirm läuft. -->
+                                <ScrollViewer MaxHeight="560" VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              Focusable="False">
+                                    <StackPanel IsItemsHost="True"
+                                                KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                </ScrollViewer>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
             <Style TargetType="MenuItem">
                 <Setter Property="Foreground" Value="{StaticResource Text}" />
@@ -639,8 +707,14 @@
                                         <Border.Effect>
                                             <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.6" />
                                         </Border.Effect>
-                                        <StackPanel IsItemsHost="True"
-                                                    KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                        <!-- Die Tag- und Kategorielisten wachsen mit der
+                                             Bibliothek, also scrollbar statt abgeschnitten. -->
+                                        <ScrollViewer MaxHeight="520" VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled"
+                                                      Focusable="False">
+                                            <StackPanel IsItemsHost="True"
+                                                        KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                        </ScrollViewer>
                                     </Border>
                                 </Popup>
                             </Grid>

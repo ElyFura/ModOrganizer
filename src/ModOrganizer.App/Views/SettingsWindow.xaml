@@ -19,11 +19,29 @@
 
         <Border Grid.Row="0" Background="{StaticResource Bg1}" Padding="24,18"
                 BorderBrush="{StaticResource Border1}" BorderThickness="0,0,0,1">
-            <StackPanel>
+            <DockPanel LastChildFill="True">
+                <!-- Der Name, unter dem man beim anderen Benutzer auftaucht. Ohne ihn
+                     steht überall die E-Mail-Adresse. -->
+                <StackPanel DockPanel.Dock="Right" Width="290" Margin="24,0,0,0"
+                            Visibility="{Binding CanEditProfile, Converter={StaticResource BoolToVisible}}">
+                    <TextBlock Text="DEIN ANZEIGENAME" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                    <DockPanel LastChildFill="True">
+                        <Button DockPanel.Dock="Right" Content="Speichern" Padding="12,5" Margin="8,0,0,0"
+                                Command="{Binding SaveDisplayNameCommand}" />
+                        <TextBox Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}"
+                                 Padding="8,5" VerticalContentAlignment="Center"
+                                 ToolTip="So erscheinst du auf Karten, in Kommentaren und im Verlauf." />
+                    </DockPanel>
+                    <TextBlock Text="{Binding ProfileStatus}" Style="{StaticResource Caption}"
+                               TextWrapping="Wrap" Margin="0,5,0,0" />
+                </StackPanel>
+
+                <StackPanel>
                 <TextBlock Text="Mod-Bibliotheken" Style="{StaticResource H1}" />
                 <TextBlock Style="{StaticResource Caption}" Margin="0,3,0,0" TextWrapping="Wrap"
                            Text="Eine Bibliothek ist für alle Benutzer dieselbe — jeder ordnet ihr aber den Ordner auf seinem eigenen PC zu. So funktioniert derselbe über Nextcloud synchronisierte Mod-Ordner auf mehreren Rechnern mit unterschiedlichen Laufwerksbuchstaben." />
-            </StackPanel>
+                </StackPanel>
+            </DockPanel>
         </Border>
 
         <Grid Grid.Row="1">

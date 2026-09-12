@@ -72,10 +72,57 @@ public sealed partial class RootSettingsViewModel : ObservableObject
     /// <summary>Raised whenever the root list or a mapping changed.</summary>
     public event EventHandler? RootsChanged;
 
-    public RootSettingsViewModel(RootService roots, ModScanner scanner)
+    private readonly UserProfileService? _profile;
+
+    public RootSettingsViewModel(RootService roots, ModScanner scanner,
+        UserProfileService? profile = null)
     {
         _roots = roots;
         _scanner = scanner;
+        _profile = profile;
+    }
+
+    // ---- the name everyone else sees ----
+
+    /// <summary>
+    /// Without this the second user shows up as their email address everywhere - on cards,
+    /// in comments, in the presence chips - because the sign-up trigger falls back to the
+    /// address when Supabase carries no display_name.
+    /// </summary>
+    [ObservableProperty] private string _displayName = "";
+
+    [ObservableProperty] private string _profileStatus = "";
+
+    /// <summary>Only offered when signed in; an offline session has no profile row.</summary>
+    public bool CanEditProfile => _profile?.GetCurrent() is not null;
+
+    private void LoadProfile()
+    {
+        var me = _profile?.GetCurrent();
+        if (me is null) return;
+        DisplayName = me.DisplayName;
+        ProfileStatus = string.Equals(me.DisplayName, me.Email, StringComparison.OrdinalIgnoreCase)
+            ? "Zurzeit wird deine E-Mail-Adresse angezeigt."
+            : "";
+    }
+
+    [RelayCommand]
+    private async Task SaveDisplayName()
+    {
+        if (_profile is null) return;
+        var name = DisplayName;
+
+        try
+        {
+            await Task.Run(() => _profile.SetDisplayName(name)).ConfigureAwait(true);
+            LoadProfile();
+            ProfileStatus = "Gespeichert. Beim anderen Benutzer erscheint der Name nach dem " +
+                            "nächsten Neuladen.";
+        }
+        catch (Exception ex)
+        {
+            ProfileStatus = "Speichern fehlgeschlagen: " + ex.Message;
+        }
     }
 
     public async Task LoadAsync()
@@ -102,6 +149,9 @@ public sealed partial class RootSettingsViewModel : ObservableObject
             Selected = previous is null
                 ? Roots.FirstOrDefault()
                 : Roots.FirstOrDefault(r => r.Id == previous.Value) ?? Roots.FirstOrDefault();
+
+            LoadProfile();
+            OnPropertyChanged(nameof(CanEditProfile));
 
             var mapped = rows.Count(r => r.IsMapped);
             var broken = rows.Count(r => r.IsMapped && !r.PathExists);

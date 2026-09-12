@@ -143,6 +143,7 @@ public partial class App : Application
                 services.AddSingleton<ThumbnailCache>();
                 services.AddSingleton<ModDetailViewModelFactory>();
                 services.AddTransient<CategoryManagerViewModel>();
+                services.AddSingleton<UserProfileService>();
                 services.AddTransient<RootSettingsViewModel>();
 
                 services.AddSingleton<MainViewModel>();
