@@ -433,7 +433,38 @@ internal static class Migrations
         }
     }
 
+    /// <summary>
+    /// Arbitrary but fixed: any two clients only need to agree on the same number to
+    /// serialise against each other.
+    /// </summary>
+    private const long MigrationLockKey = 0x4D4F444F52473031; // "MODORG01"
+
     public static void Apply(NpgsqlConnection conn)
+    {
+        // Every client applies migrations on startup, so two people launching the app at
+        // the same moment run the same DDL concurrently. Today's migrations are all
+        // idempotent, but one that is not would corrupt the schema - and a session-level
+        // advisory lock costs a single round trip to rule that out for good.
+        Execute(conn, $"SELECT pg_advisory_lock({MigrationLockKey})");
+        try
+        {
+            ApplyPending(conn);
+        }
+        finally
+        {
+            try { Execute(conn, $"SELECT pg_advisory_unlock({MigrationLockKey})"); }
+            catch { /* the lock dies with the session anyway */ }
+        }
+    }
+
+    private static void Execute(NpgsqlConnection conn, string sql)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
+    }
+
+    private static void ApplyPending(NpgsqlConnection conn)
     {
         var current = CurrentVersion(conn);
         foreach (var (version, sql) in All)

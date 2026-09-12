@@ -163,7 +163,20 @@ public sealed class PenumbraService
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "XIVLauncher", "pluginConfigs");
 
+    /// <summary>
+    /// The folder Penumbra writes its config into. Public so the app can watch it and
+    /// re-share the snapshot when mods are toggled while the app is running.
+    /// </summary>
+    public static string PluginConfigsPath => PluginConfigsRoot;
+
     private static string MainConfigPath        => Path.Combine(PluginConfigsRoot, "Penumbra.json");
+
+    /// <summary>
+    /// Penumbra keeps a backup next to its config and, at least while the game is running,
+    /// the main file can be absent for long stretches - leaving only this one. Reading it
+    /// costs nothing and is far better than reporting "Penumbra not installed".
+    /// </summary>
+    private static string MainConfigBackupPath  => Path.Combine(PluginConfigsRoot, "Penumbra.json.bak");
     private static string PenumbraSubdir        => Path.Combine(PluginConfigsRoot, "Penumbra");
     private static string ActiveCollectionsPath => Path.Combine(PenumbraSubdir, "active_collections.json");
     private static string CollectionsDir        => Path.Combine(PenumbraSubdir, "collections");
@@ -190,24 +203,41 @@ public sealed class PenumbraService
         return Whitespace.Replace(sb.ToString(), " ").Trim();
     }
 
+    /// <summary>ModDirectory out of a Penumbra config file, or null if unreadable.</summary>
+    private static string? ReadModDirectory(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            return doc.RootElement.TryGetProperty("ModDirectory", out var md) ? md.GetString() : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public PenumbraSnapshot Read()
     {
         try
         {
-            if (!File.Exists(MainConfigPath))
-                return new PenumbraSnapshot { IsAvailable = false };
+            // The main config is only needed for ModDirectory. Everything the other user
+            // actually sees - collections and what is enabled in them - lives in the
+            // Penumbra subfolder, so a missing main config must not abort the whole read.
+            var modDir = ReadModDirectory(MainConfigPath) ?? ReadModDirectory(MainConfigBackupPath);
 
-            string? modDir;
-            using (var doc = JsonDocument.Parse(File.ReadAllText(MainConfigPath)))
-            {
-                modDir = doc.RootElement.TryGetProperty("ModDirectory", out var md) ? md.GetString() : null;
-            }
-            if (string.IsNullOrWhiteSpace(modDir) || !Directory.Exists(modDir))
+            var haveModDir = !string.IsNullOrWhiteSpace(modDir) && Directory.Exists(modDir);
+            if (!haveModDir && !Directory.Exists(CollectionsDir))
                 return new PenumbraSnapshot { IsAvailable = false };
 
             // --- imported mods (folder + meta.Name) ---
+            // Without a ModDirectory we cannot see which mods are *imported*, but the
+            // collections below still tell us what is enabled where.
             var entriesByFolder = new Dictionary<string, EntryBuilder>(StringComparer.OrdinalIgnoreCase);
-            foreach (var dir in Directory.EnumerateDirectories(modDir))
+            foreach (var dir in haveModDir
+                         ? Directory.EnumerateDirectories(modDir!)
+                         : Enumerable.Empty<string>())
             {
                 var metaPath = Path.Combine(dir, "meta.json");
                 if (!File.Exists(metaPath)) continue;

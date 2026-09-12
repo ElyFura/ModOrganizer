@@ -1,7 +1,7 @@
 <Window x:Class="ModOrganizer.App.Dialogs.BulkRenameDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Bulk Rename" Height="640" Width="860"
+        Title="Sammel-Umbenennung" Height="640" Width="860"
         Background="{DynamicResource Bg0}" Foreground="{DynamicResource Text}"
         FontFamily="Segoe UI Variable, Segoe UI" FontSize="13"
         WindowStartupLocation="CenterOwner">
@@ -16,33 +16,33 @@
         <Border Grid.Row="0" Background="{DynamicResource Bg1}" Padding="24,18"
                 BorderBrush="{DynamicResource Border1}" BorderThickness="0,0,0,1">
             <StackPanel>
-                <TextBlock Text="Bulk Rename" Style="{DynamicResource H1}" />
+                <TextBlock Text="Sammel-Umbenennung" Style="{DynamicResource H1}" />
                 <TextBlock x:Name="SubtitleText" Style="{DynamicResource Caption}" Margin="0,3,0,0" />
             </StackPanel>
         </Border>
 
         <StackPanel Grid.Row="1" Margin="24,18,24,0">
-            <TextBlock Text="PATTERN" Style="{DynamicResource Label}" />
+            <TextBlock Text="MUSTER" Style="{DynamicResource Label}" />
             <DockPanel LastChildFill="True">
                 <ComboBox DockPanel.Dock="Left" x:Name="KindBox" Width="140" Margin="0,0,8,0">
-                    <ComboBoxItem Content="Template" IsSelected="True" />
+                    <ComboBoxItem Content="Vorlage" IsSelected="True" />
                     <ComboBoxItem Content="Regex" />
                 </ComboBox>
-                <Button DockPanel.Dock="Right" Content="Preview" Click="Preview_Click" Margin="8,0,0,0" />
+                <Button DockPanel.Dock="Right" Content="Vorschau" Click="Preview_Click" Margin="8,0,0,0" />
                 <TextBox x:Name="PatternBox" />
             </DockPanel>
             <TextBlock Style="{DynamicResource Caption}" Margin="0,6,0,0">
-                <Run Text="Template placeholders:" />
+                <Run Text="Platzhalter:" />
                 <Run Text="{}{original}" />
                 <Run Text="{}{category}" />
                 <Run Text="{}{index}" />
-                <Run Text="  —  Regex format: /find/replace/" />
+                <Run Text="  —  Regex-Format: /suchen/ersetzen/" />
             </TextBlock>
         </StackPanel>
 
         <DataGrid Grid.Row="2" x:Name="Grid" AutoGenerateColumns="False" Margin="24,12,24,0" IsReadOnly="True">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="From" Binding="{Binding OldFolderName}" Width="*" />
+                <DataGridTextColumn Header="Von" Binding="{Binding OldFolderName}" Width="*" />
                 <DataGridTextColumn Header="→ To" Binding="{Binding NewFolderName}" Width="*" />
                 <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="140" />
             </DataGrid.Columns>
@@ -51,8 +51,8 @@
         <Border Grid.Row="3" Background="{DynamicResource Bg1}" Padding="24,14"
                 BorderBrush="{DynamicResource Border1}" BorderThickness="0,1,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0" />
-                <Button Content="Apply" Click="Apply_Click" Style="{DynamicResource PrimaryButton}" />
+                <Button Content="Abbrechen" Click="Cancel_Click" Margin="0,0,8,0" />
+                <Button Content="Übernehmen" Click="Apply_Click" Style="{DynamicResource PrimaryButton}" />
             </StackPanel>
         </Border>
     </Grid>

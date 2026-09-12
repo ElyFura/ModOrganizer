@@ -5,7 +5,14 @@ public enum HealthIssueKind
     NoImage = 1,
     MultiImage = 2,
     BrokenImage = 3,
-    OrphanImage = 4
+    OrphanImage = 4,
+
+    /// <summary>
+    /// A .pmp/.ttmp2 the scanner could not read: the hash stayed NULL although every
+    /// archive gets one, or the file is empty. Usually a sync that copied a placeholder,
+    /// or a genuinely corrupt download.
+    /// </summary>
+    BrokenArchive = 5
 }
 
 public enum HealthSeverity

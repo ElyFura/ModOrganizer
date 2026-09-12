@@ -5,7 +5,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="Manage Categories" Height="660" Width="860"
+        Title="Kategorien verwalten" Height="660" Width="860"
         Background="{DynamicResource Bg0}" Foreground="{DynamicResource Text}"
         FontFamily="Segoe UI Variable, Segoe UI" FontSize="13"
         d:DataContext="{d:DesignInstance Type=vm:CategoryManagerViewModel}"
@@ -20,11 +20,11 @@
                 BorderBrush="{StaticResource Border1}" BorderThickness="0,0,0,1">
             <DockPanel LastChildFill="False">
                 <StackPanel DockPanel.Dock="Left">
-                    <TextBlock Text="Categories" Style="{StaticResource H1}" />
-                    <TextBlock Text="Create, rename, reorder, merge or delete categories" Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                    <TextBlock Text="Kategorien" Style="{StaticResource H1}" />
+                    <TextBlock Text="Kategorien anlegen, umbenennen, sortieren, zusammenführen oder löschen" Style="{StaticResource Caption}" Margin="0,3,0,0" />
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="Root:" VerticalAlignment="Center" Margin="0,0,8,0"
+                    <TextBlock Text="Bibliothek:" VerticalAlignment="Center" Margin="0,0,8,0"
                                Foreground="{StaticResource TextDim}" />
                     <ComboBox ItemsSource="{Binding Roots}" SelectedItem="{Binding SelectedRoot}"
                               DisplayMemberPath="DisplayName" Width="240" />
@@ -46,7 +46,7 @@
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" />
                     <DataGridTextColumn Header="Mods" Binding="{Binding ModCount}" Width="80" />
-                    <DataGridCheckBoxColumn Header="Missing" Binding="{Binding IsMissing}" Width="70" />
+                    <DataGridCheckBoxColumn Header="Fehlt" Binding="{Binding IsMissing}" Width="70" />
                 </DataGrid.Columns>
             </DataGrid>
 
@@ -54,32 +54,32 @@
 
             <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
                 <StackPanel Margin="20,18,24,18">
-                    <TextBlock Text="ADD NEW" Style="{StaticResource Label}" />
+                    <TextBlock Text="NEU ANLEGEN" Style="{StaticResource Label}" />
                     <DockPanel>
-                        <Button DockPanel.Dock="Right" Content="Add" Command="{Binding AddCategoryCommand}"
+                        <Button DockPanel.Dock="Right" Content="Anlegen" Command="{Binding AddCategoryCommand}"
                                 Style="{StaticResource PrimaryButton}" Margin="6,0,0,0" />
                         <TextBox Text="{Binding NewCategoryName, UpdateSourceTrigger=PropertyChanged}" />
                     </DockPanel>
 
-                    <TextBlock Text="RENAME SELECTED" Style="{StaticResource Label}" Margin="0,20,0,6" />
+                    <TextBlock Text="AUSGEWÄHLTE UMBENENNEN" Style="{StaticResource Label}" Margin="0,20,0,6" />
                     <DockPanel>
-                        <Button DockPanel.Dock="Right" Content="Apply" Command="{Binding RenameCategoryCommand}" Margin="6,0,0,0" />
+                        <Button DockPanel.Dock="Right" Content="Übernehmen" Command="{Binding RenameCategoryCommand}" Margin="6,0,0,0" />
                         <TextBox Text="{Binding RenameText, UpdateSourceTrigger=PropertyChanged}" />
                     </DockPanel>
 
-                    <TextBlock Text="REORDER" Style="{StaticResource Label}" Margin="0,20,0,6" />
+                    <TextBlock Text="SORTIEREN" Style="{StaticResource Label}" Margin="0,20,0,6" />
                     <UniformGrid Columns="2" Rows="1">
-                        <Button Content="↑  Up" Command="{Binding MoveUpCommand}" Margin="0,0,3,0" />
-                        <Button Content="↓  Down" Command="{Binding MoveDownCommand}" Margin="3,0,0,0" />
+                        <Button Content="↑  Hoch" Command="{Binding MoveUpCommand}" Margin="0,0,3,0" />
+                        <Button Content="↓  Runter" Command="{Binding MoveDownCommand}" Margin="3,0,0,0" />
                     </UniformGrid>
 
-                    <TextBlock Text="MERGE INTO" Style="{StaticResource Label}" Margin="0,20,0,6" />
+                    <TextBlock Text="ZUSAMMENFÜHREN MIT" Style="{StaticResource Label}" Margin="0,20,0,6" />
                     <ComboBox ItemsSource="{Binding Categories}" SelectedItem="{Binding MergeTarget}" DisplayMemberPath="Name" />
-                    <Button Content="Merge selected → target" Command="{Binding MergeIntoTargetCommand}" Margin="0,6,0,0" />
+                    <Button Content="Ausgewählte ins Ziel zusammenführen" Command="{Binding MergeIntoTargetCommand}" Margin="0,6,0,0" />
 
                     <Border Height="1" Background="{StaticResource Border1}" Margin="0,24,0,14" />
 
-                    <Button Content="Delete selected category" Command="{Binding DeleteCategoryCommand}"
+                    <Button Content="Ausgewählte Kategorie löschen" Command="{Binding DeleteCategoryCommand}"
                             Style="{StaticResource DangerButton}" Padding="12,8" />
                 </StackPanel>
             </ScrollViewer>

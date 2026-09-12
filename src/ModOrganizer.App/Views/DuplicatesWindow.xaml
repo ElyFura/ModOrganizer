@@ -5,7 +5,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="Duplicates" Height="700" Width="1000"
+        Title="Duplikate" Height="700" Width="1000"
         Background="{DynamicResource Bg0}" Foreground="{DynamicResource Text}"
         FontFamily="Segoe UI Variable, Segoe UI" FontSize="13"
         d:DataContext="{d:DesignInstance Type=vm:DuplicatesViewModel}"
@@ -21,7 +21,7 @@
                 BorderBrush="{StaticResource Border1}" BorderThickness="0,0,0,1">
             <DockPanel LastChildFill="False">
                 <StackPanel DockPanel.Dock="Left">
-                    <TextBlock Text="Duplicates" Style="{StaticResource H1}" />
+                    <TextBlock Text="Duplikate" Style="{StaticResource H1}" />
                     <TextBlock Text="{Binding StatusText}" Style="{StaticResource Caption}" Margin="0,3,0,0" />
                 </StackPanel>
                 <Button DockPanel.Dock="Right" Content="Neu suchen" Padding="14,6"

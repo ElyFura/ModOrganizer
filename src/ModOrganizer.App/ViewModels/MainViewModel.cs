@@ -65,6 +65,30 @@ public sealed partial class MainViewModel : ObservableObject
 
     public bool HasMissing => MissingCount > 0;
 
+    // ---- realtime link ----
+
+    /// <summary>
+    /// Whether we are still receiving the other user's changes. Shown because a dead socket
+    /// used to look exactly like a quiet one.
+    /// </summary>
+    [ObservableProperty] private bool _realtimeConnected;
+
+    /// <summary>Only worth showing once realtime was actually set up for this session.</summary>
+    [ObservableProperty] private bool _realtimeEnabled;
+
+    public string RealtimeText => RealtimeConnected ? "live" : "getrennt";
+
+    public string RealtimeTooltip => RealtimeConnected
+        ? "Änderungen des anderen Benutzers kommen sofort an."
+        : "Keine Verbindung zum Live-Kanal. Die App versucht es automatisch erneut; " +
+          "bis dahin siehst du Änderungen erst nach einem Neuladen.";
+
+    partial void OnRealtimeConnectedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(RealtimeText));
+        OnPropertyChanged(nameof(RealtimeTooltip));
+    }
+
     public string MissingBannerText => MissingCount == 1
         ? "1 Mod ist nicht mehr im Ordner"
         : $"{MissingCount} Mods sind nicht mehr im Ordner";
@@ -147,12 +171,54 @@ public sealed partial class MainViewModel : ObservableObject
     public PresenceService? Presence { get; set; }
     public ObservableCollection<PresenceChipViewModel> OnlineUsers { get; } = new();
 
+    /// <summary>True once somebody besides this user is online.</summary>
+    public bool HasOnlineUsers => OnlineUsers.Any(u => !u.IsSelf);
+
+    /// <summary>
+    /// Rebuilds the online list and marks the cards somebody currently has open.
+    ///
+    /// The presence data was already being broadcast and received before this - it simply
+    /// never reached the window, so nobody could see who was looking at what.
+    /// </summary>
     public void RefreshPresence()
     {
         if (Presence is null) return;
+
+        var selfId = Presence.SelfId;
+        var viewers = new Dictionary<long, PresenceChipViewModel>();
+
         OnlineUsers.Clear();
-        foreach (var p in Presence.OnlineUsers.Values)
-            OnlineUsers.Add(new PresenceChipViewModel(p));
+        foreach (var p in Presence.OnlineUsers.Values.OrderBy(u => u.DisplayName))
+        {
+            var isSelf = selfId is { } me && me == p.UserId;
+
+            // Only this view knows the loaded cards, so the mod name is resolved here.
+            string? modName = null;
+            if (p.ViewingModId is { } id)
+                modName = Mods.FirstOrDefault(m => m.Model.Id == id)?.DisplayName;
+
+            var chip = new PresenceChipViewModel(p, modName, isSelf);
+            OnlineUsers.Add(chip);
+
+            // Your own open detail window is not news - only mark other people's.
+            if (!isSelf && p.ViewingModId is { } modId) viewers[modId] = chip;
+        }
+
+        foreach (var card in Mods)
+        {
+            if (viewers.TryGetValue(card.Model.Id, out var chip))
+            {
+                card.ViewedByName = chip.DisplayName;
+                card.ViewedByBrush = chip.Brush;
+            }
+            else if (card.ViewedByName is not null)
+            {
+                card.ViewedByName = null;
+                card.ViewedByBrush = null;
+            }
+        }
+
+        OnPropertyChanged(nameof(HasOnlineUsers));
     }
 
     public IReadOnlyList<SortOption> SortOptions { get; } = new SortOption[]
@@ -449,7 +515,10 @@ public sealed partial class MainViewModel : ObservableObject
 
             _currentCards = visible;
             VisibleModCount = Mods.Count;
-            StatusText = $"{VisibleModCount} mods";
+
+            // These are new card view models, so re-apply who is looking at what.
+            RefreshPresence();
+            StatusText = $"{VisibleModCount} Mods";
 
             // The folder tree is only built when that view is actually showing. It used to
             // be rebuilt on every refresh, decoding a second thumbnail for every mod.
@@ -1055,6 +1124,8 @@ public sealed partial class MainViewModel : ObservableObject
         _penumbraUsers = users;
 
         OnPropertyChanged(nameof(PenumbraAvailable));
+        OnPropertyChanged(nameof(PenumbraUsersText));
+        OnPropertyChanged(nameof(PenumbraHasStale));
         RebuildCollectionFilters();
     }
 
@@ -1086,8 +1157,31 @@ public sealed partial class MainViewModel : ObservableObject
                 : AllCollectionsOption;
     }
 
-    private static string FormatCollectionFilter(PenumbraUserSnapshot u, string collectionName) =>
-        u.IsSelf ? $"{collectionName} (du)" : $"{collectionName} ({u.DisplayName})";
+    private static string FormatCollectionFilter(PenumbraUserSnapshot u, string collectionName)
+    {
+        if (u.IsSelf) return $"{collectionName} (du)";
+
+        // A day-old snapshot looks identical to a current one unless it says so.
+        return u.IsStale
+            ? $"{collectionName} ({u.DisplayName}, {u.AgeText})"
+            : $"{collectionName} ({u.DisplayName})";
+    }
+
+    /// <summary>
+    /// Who is sharing their Penumbra state and how fresh it is. Shown next to the filter,
+    /// because acting on a stale "is enabled" is worse than knowing nothing.
+    /// </summary>
+    public string PenumbraUsersText
+    {
+        get
+        {
+            var others = _penumbraUsers.Where(u => !u.IsSelf).ToList();
+            if (others.Count == 0) return "nur dein Stand";
+            return string.Join(" · ", others.Select(u => $"{u.DisplayName}: {u.AgeText}"));
+        }
+    }
+
+    public bool PenumbraHasStale => _penumbraUsers.Any(u => u.IsStale);
 
     private void ApplyPenumbraToCard(ModCardViewModel vm, ModCard card)
     {
@@ -1305,7 +1399,7 @@ public sealed partial class MainViewModel : ObservableObject
         {
             _moveSvc.Execute(plan);
             RefreshMods();
-            StatusText = $"Moved to {target.Name}";
+            StatusText = $"Nach {target.Name} verschoben";
         }
     }
 
@@ -1340,7 +1434,7 @@ public sealed partial class MainViewModel : ObservableObject
         var selected = Mods.Where(m => m.IsSelected).ToList();
         if (selected.Count < 2)
         {
-            MessageBox.Show("Select at least two mods (Ctrl+Click) for bulk rename.",
+            MessageBox.Show("Mindestens zwei Mods auswählen (Strg+Klick), um sammelweise umzubenennen.",
                 "Bulk Rename", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
@@ -1381,9 +1475,9 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task ReloadFromDb()
     {
-        StatusText = "Reloading from DB…";
+        StatusText = "Lade neu aus der Datenbank…";
         await LoadAsync().ConfigureAwait(true);
-        StatusText = $"{VisibleModCount} mods · refreshed from DB";
+        StatusText = $"{VisibleModCount} Mods · neu aus der Datenbank geladen";
     }
 
     public void RefreshSelectedCount() => OnPropertyChanged(nameof(SelectedCount));

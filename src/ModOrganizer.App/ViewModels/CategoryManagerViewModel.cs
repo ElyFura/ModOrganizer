@@ -115,9 +115,14 @@ public sealed partial class CategoryManagerViewModel : ObservableObject
         if (category.ModCount > 0)
         {
             var confirm = MessageBox.Show(
-                $"Category '{category.Name}' contains {category.ModCount} mod(s).\n" +
-                "Send the whole folder to the Recycle Bin?",
-                "Delete category", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                $"„{category.Name}“ enthält {category.ModCount} Mod(s).\n\n" +
+                "Der Ordner wandert in den Windows-Papierkorb - und weil er über Nextcloud " +
+                "synchronisiert wird, verschwindet er auch beim anderen Benutzer.\n\n" +
+                "Die Mods werden dabei ENDGÜLTIG aus der Datenbank entfernt, nicht in den " +
+                "App-Papierkorb verschoben: Bewertungen, Tags und Kommentare sind danach " +
+                "weg und lassen sich nicht wiederherstellen.\n\n" +
+                "Wirklich löschen?",
+                "Kategorie löschen", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (confirm != MessageBoxResult.Yes) return;
         }
 

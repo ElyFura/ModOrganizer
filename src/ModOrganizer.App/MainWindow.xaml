@@ -61,7 +61,7 @@
                                     <TextBlock Text="&#xE91B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                                                FontSize="32" Foreground="{DynamicResource TextFaint}"
                                                HorizontalAlignment="Center" />
-                                    <TextBlock Text="no preview" Style="{DynamicResource Caption}"
+                                    <TextBlock Text="keine Vorschau" Style="{DynamicResource Caption}"
                                                HorizontalAlignment="Center" Margin="0,6,0,0" />
                                 </StackPanel>
                             </Border>
@@ -77,6 +77,22 @@
                                     Visibility="{Binding PenumbraVisible, Converter={StaticResource BoolToVisible}}">
                                 <TextBlock Text="{Binding PenumbraText}" Foreground="White"
                                            FontSize="10" FontWeight="SemiBold" />
+                            </Border>
+
+                            <!-- Der andere Benutzer hat diesen Mod gerade offen -->
+                            <Border CornerRadius="8" Padding="7,3"
+                                    Background="{Binding ViewedByBrush}"
+                                    HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                    Margin="0,0,8,8"
+                                    ToolTip="{Binding ViewedByTooltip}"
+                                    Visibility="{Binding IsViewedByOther, Converter={StaticResource BoolToVisible}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE890;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                               FontSize="10" Foreground="White" Margin="0,0,5,0"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding ViewedByName}" Foreground="White"
+                                               FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                </StackPanel>
                             </Border>
 
                             <!-- Gone from disk. Shown only in the review list, but marked
@@ -271,18 +287,43 @@
                             <TextBlock Text="{Binding AccountLabel}" Style="{DynamicResource Caption}"
                                        TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                         </DockPanel>
+
+                        <!-- Wer gerade online ist. Der Punkt am Rand heißt: sieht gerade
+                             einen Mod an. -->
+                        <ItemsControl ItemsSource="{Binding OnlineUsers}" Margin="0,8,0,0"
+                                      Visibility="{Binding HasOnlineUsers, Converter={StaticResource BoolToVisible}}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,6,0" ToolTip="{Binding Tooltip}">
+                                        <Border Width="26" Height="26" CornerRadius="13"
+                                                Background="{Binding Brush}">
+                                            <TextBlock Text="{Binding Initials}" Foreground="White"
+                                                       FontSize="10" FontWeight="SemiBold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <Ellipse Width="9" Height="9" Fill="#3FB950"
+                                                 Stroke="{DynamicResource Bg1}" StrokeThickness="2"
+                                                 HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                 Visibility="{Binding ViewingModId, Converter={StaticResource NotNullToVisible}}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </StackPanel>
                 </Border>
 
                 <StackPanel DockPanel.Dock="Top" Margin="20,10,20,0">
-                    <TextBlock Text="ROOT" Style="{DynamicResource Label}" />
+                    <TextBlock Text="BIBLIOTHEK" Style="{DynamicResource Label}" />
                     <ComboBox ItemsSource="{Binding Roots}" SelectedItem="{Binding SelectedRoot}"
                               DisplayMemberPath="DisplayName" />
 
-                    <TextBlock Text="SEARCH" Style="{DynamicResource Label}" Margin="0,14,0,6" />
+                    <TextBlock Text="SUCHE" Style="{DynamicResource Label}" Margin="0,14,0,6" />
                     <TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
 
-                    <TextBlock Text="MIN RATING" Style="{DynamicResource Label}" Margin="0,14,0,6" />
+                    <TextBlock Text="MIND. BEWERTUNG" Style="{DynamicResource Label}" Margin="0,14,0,6" />
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Text="{Binding MinRating}"
                                    VerticalAlignment="Center" MinWidth="16" Foreground="{DynamicResource TextDim}" />
@@ -293,24 +334,24 @@
 
                 <StackPanel DockPanel.Dock="Top" Margin="20,14,20,0">
                     <UniformGrid Columns="2" Rows="1">
-                        <Button Content="Rescan" Command="{Binding RescanCommand}" Style="{DynamicResource PrimaryButton}" Margin="0,0,3,0"
-                                ToolTip="F5: Disk durchsuchen (langsam, alle Dateien lesen)" />
-                        <Button Content="Reload" Command="{Binding ReloadFromDbCommand}" Margin="3,0,0,0"
+                        <Button Content="Neu scannen" Command="{Binding RescanCommand}" Style="{DynamicResource PrimaryButton}" Margin="0,0,3,0"
+                                ToolTip="F5: Ordner durchsuchen (langsam, liest alle Dateien)" />
+                        <Button Content="Neu laden" Command="{Binding ReloadFromDbCommand}" Margin="3,0,0,0"
                                 ToolTip="Nur aus der DB neu laden (zieht Partner-Änderungen)" />
                     </UniformGrid>
-                    <Button Content="Settings (Ctrl+,)" Command="{Binding OpenSettingsCommand}" Margin="0,6,0,0" Padding="0,6" FontSize="11" />
+                    <Button Content="Einstellungen (Strg+,)" Command="{Binding OpenSettingsCommand}" Margin="0,6,0,0" Padding="0,6" FontSize="11" />
                     <UniformGrid Columns="3" Rows="1" Margin="0,6,0,0">
-                        <Button Content="Categories" Command="{Binding OpenCategoryManagerCommand}" Margin="0,0,3,0" Padding="0,6" FontSize="11" />
-                        <Button Content="Health" Command="{Binding OpenHealthCommand}" Margin="3,0,3,0" Padding="0,6" FontSize="11" />
-                        <Button Content="Dupes" Command="{Binding OpenDuplicatesCommand}" Margin="3,0,0,0" Padding="0,6" FontSize="11" />
+                        <Button Content="Kategorien" Command="{Binding OpenCategoryManagerCommand}" Margin="0,0,3,0" Padding="0,6" FontSize="11" />
+                        <Button Content="Prüfen" Command="{Binding OpenHealthCommand}" Margin="3,0,3,0" Padding="0,6" FontSize="11" />
+                        <Button Content="Duplikate" Command="{Binding OpenDuplicatesCommand}" Margin="3,0,0,0" Padding="0,6" FontSize="11" />
                     </UniformGrid>
                     <UniformGrid Columns="2" Rows="2" Margin="0,6,0,0">
-                        <Button Content="Stats" Command="{Binding OpenStatsCommand}" Margin="0,0,3,3" Padding="0,6" FontSize="11" />
-                        <Button Content="Activity" Command="{Binding OpenActivityFeedCommand}" Margin="3,0,0,3" Padding="0,6" FontSize="11" />
+                        <Button Content="Statistik" Command="{Binding OpenStatsCommand}" Margin="0,0,3,3" Padding="0,6" FontSize="11" />
+                        <Button Content="Aktivität" Command="{Binding OpenActivityFeedCommand}" Margin="3,0,0,3" Padding="0,6" FontSize="11" />
                         <Button Content="Verlauf" Command="{Binding OpenHistoryCommand}" Margin="0,3,3,0" Padding="0,6" FontSize="11" />
-                        <Button Content="Trash" Command="{Binding OpenTrashCommand}" Margin="3,3,0,0" Padding="0,6" FontSize="11" />
+                        <Button Content="Papierkorb" Command="{Binding OpenTrashCommand}" Margin="3,3,0,0" Padding="0,6" FontSize="11" />
                     </UniformGrid>
-                    <Button Content="HTML Export" Command="{Binding ExportHtmlCatalogCommand}" Margin="0,6,0,0" Padding="0,6" FontSize="11" />
+                    <Button Content="HTML-Export" Command="{Binding ExportHtmlCatalogCommand}" Margin="0,6,0,0" Padding="0,6" FontSize="11" />
                     <Button Content="Penumbra prüfen" Command="{Binding RefreshPenumbraCommand}" Margin="0,6,0,0" Padding="0,6" FontSize="11" />
                 </StackPanel>
 
@@ -321,7 +362,7 @@
 
                 <Border Padding="20,22,20,6">
                     <DockPanel>
-                        <TextBlock Text="CATEGORIES" Style="{DynamicResource Label}" Margin="0" />
+                        <TextBlock Text="KATEGORIEN" Style="{DynamicResource Label}" Margin="0" />
                         <TextBlock DockPanel.Dock="Right" Text="{Binding Categories.Count, StringFormat={}{0}}"
                                    Style="{DynamicResource Caption}" HorizontalAlignment="Right" />
                     </DockPanel>
@@ -430,10 +471,10 @@
 
                 <Border Padding="20,18,20,6">
                     <DockPanel>
-                        <TextBlock Text="SMART COLLECTIONS" Style="{DynamicResource Label}" Margin="0" />
+                        <TextBlock Text="SMARTE SAMMLUNGEN" Style="{DynamicResource Label}" Margin="0" />
                         <Button DockPanel.Dock="Right" Content="+" Padding="6,0" FontSize="13"
                                 Command="{Binding SaveSmartCollectionCommand}"
-                                ToolTip="Aktuellen Filter als Smart Collection speichern" />
+                                ToolTip="Aktuellen Filter als smarte Sammlung speichern" />
                     </DockPanel>
                 </Border>
                 <ItemsControl ItemsSource="{Binding SmartCollections}">
@@ -491,19 +532,35 @@
                                   Width="180" Margin="0,0,14,0"
                                   Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}"
                                   ToolTip="Nur Mods aus dieser Collection" />
-                        <TextBlock Text="Sort:" VerticalAlignment="Center" Foreground="{DynamicResource TextDim}" Margin="0,0,6,0" />
+                        <!-- Wie frisch der geteilte Penumbra-Stand der anderen ist -->
+                        <TextBlock VerticalAlignment="Center" Margin="0,0,14,0" FontSize="11"
+                                   Text="{Binding PenumbraUsersText}"
+                                   ToolTip="Stand des geteilten Penumbra-Abgleichs je Benutzer"
+                                   Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{DynamicResource TextFaint}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding PenumbraHasStale}" Value="True">
+                                            <Setter Property="Foreground" Value="#E8B45A" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock Text="Sortierung:" VerticalAlignment="Center" Foreground="{DynamicResource TextDim}" Margin="0,0,6,0" />
                         <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SelectedSort}"
                                   Width="190" Margin="0,0,14,0" />
                         <Button Command="{Binding BulkRenameCommand}" Padding="10,6" Margin="0,0,6,0"
                                 Visibility="{Binding SelectedCount, Converter={StaticResource BoolToVisible}}">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Bulk rename " />
+                                <TextBlock Text="Sammel-Umbenennung " />
                                 <TextBlock Text="(" Foreground="{DynamicResource TextDim}" />
                                 <TextBlock Text="{Binding SelectedCount}" Foreground="{DynamicResource TextDim}" />
                                 <TextBlock Text=")" Foreground="{DynamicResource TextDim}" />
                             </StackPanel>
                         </Button>
-                        <Button Command="{Binding ClearSelectionCommand}" Content="Clear" Padding="10,6" Margin="0,0,6,0"
+                        <Button Command="{Binding ClearSelectionCommand}" Content="Zurücksetzen" Padding="10,6" Margin="0,0,6,0"
                                 Visibility="{Binding SelectedCount, Converter={StaticResource BoolToVisible}}" />
                         <Button Command="{Binding ToggleViewModeCommand}" Padding="10,6">
                             <StackPanel Orientation="Horizontal">
@@ -521,7 +578,7 @@
                         </TextBlock>
                         <TextBlock Style="{DynamicResource Caption}" Margin="0,3,0,0">
                             <Run Text="{Binding VisibleModCount, Mode=OneWay}" />
-                            <Run Text=" mods visible · drop .pmp/.ttmp2 files here to import" />
+                            <Run Text=" Mods sichtbar · .pmp/.ttmp2-Dateien hierher ziehen zum Importieren" />
                         </TextBlock>
                         <Border Background="#2A2440" CornerRadius="6" Padding="8,3" Margin="0,6,0,0"
                                 HorizontalAlignment="Left"
@@ -596,7 +653,7 @@
                         <TextBlock Text="&#xE7BA;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                                    FontSize="48" Foreground="{DynamicResource TextFaint}"
                                    HorizontalAlignment="Center" />
-                        <TextBlock Text="No mods match the current filter" Style="{DynamicResource H2}"
+                        <TextBlock Text="Keine Mods passen zum aktuellen Filter" Style="{DynamicResource H2}"
                                    Foreground="{DynamicResource TextDim}" Margin="0,12,0,0" />
                     </StackPanel>
                 </Grid>
@@ -631,9 +688,31 @@
 
             <Border Grid.Row="2" Background="{DynamicResource Bg1}" Padding="28,8"
                     BorderBrush="{DynamicResource Border1}" BorderThickness="0,1,0,0">
-                <TextBlock Style="{DynamicResource Caption}">
-                    <Run Text="Doppelklick öffnet Detail · Rechtsklick: Kategorie-Menü · Ctrl+Click: Multi-Select · Drop Images auf Card setzt Preview" />
-                </TextBlock>
+                <DockPanel LastChildFill="True">
+                    <!-- Live-Verbindung zum anderen Benutzer -->
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                VerticalAlignment="Center" Margin="16,0,0,0"
+                                ToolTip="{Binding RealtimeTooltip}"
+                                Visibility="{Binding RealtimeEnabled, Converter={StaticResource BoolToVisible}}">
+                        <Ellipse Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,6,0">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="#C4761F" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding RealtimeConnected}" Value="True">
+                                            <Setter Property="Fill" Value="#3FB950" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Text="{Binding RealtimeText}" Style="{DynamicResource Caption}"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Style="{DynamicResource Caption}" TextTrimming="CharacterEllipsis">
+                        <Run Text="Doppelklick öffnet Detail · Rechtsklick: Kategorie-Menü · Ctrl+Klick: Mehrfachauswahl · Bilder auf eine Karte ziehen setzt die Vorschau" />
+                    </TextBlock>
+                </DockPanel>
             </Border>
         </Grid>
 
@@ -642,7 +721,7 @@
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="800">
                 <TextBlock Text="&#xE895;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                            FontSize="48" Foreground="White" HorizontalAlignment="Center" />
-                <TextBlock Text="Scanning…" Foreground="White" FontSize="18" Margin="0,12,0,4"
+                <TextBlock Text="Scanne…" Foreground="White" FontSize="18" Margin="0,12,0,4"
                            HorizontalAlignment="Center" />
                 <TextBlock Text="{Binding StatusText}" Foreground="#CCCCCC" FontSize="12"
                            TextAlignment="Center" TextWrapping="Wrap" Margin="20,0,20,12" />

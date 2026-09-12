@@ -20,7 +20,7 @@ public partial class ConfigSetupWindow : Window
     {
         if (string.IsNullOrWhiteSpace(ConnBox.Text))
         {
-            MessageBox.Show("Connection string ist Pflicht.", "Fehlt", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Die Verbindungszeichenfolge ist Pflicht.", "Fehlt", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         _cfg.Postgres.ConnectionString = ConnBox.Text.Trim();

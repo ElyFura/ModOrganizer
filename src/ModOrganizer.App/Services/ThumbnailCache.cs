@@ -4,6 +4,7 @@ using System.IO.Hashing;
 using System.Text;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Diagnostics;
 
 namespace ModOrganizer.App.Services;
 
@@ -71,6 +72,59 @@ public sealed class ThumbnailCache
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "FFXIVModOrganizer", "thumbs");
         try { Directory.CreateDirectory(_diskRoot); } catch { /* cache is optional */ }
+    }
+
+    /// <summary>
+    /// Upper bound for the on-disk cache. Entries are keyed by path+size+mtime, so every
+    /// edited preview leaves its old entry behind forever - without a cap the folder only
+    /// ever grows.
+    /// </summary>
+    private const long DiskCacheBudgetBytes = 500L * 1024 * 1024;
+
+    /// <summary>
+    /// Trims the disk cache to <see cref="DiskCacheBudgetBytes"/>, oldest access first.
+    /// Call once at startup and let it run in the background: it is pure maintenance, and
+    /// a deleted entry only costs one re-decode.
+    /// </summary>
+    public void PruneDiskCache()
+    {
+        try
+        {
+            var files = new DirectoryInfo(_diskRoot)
+                .EnumerateFiles("*.jpg", SearchOption.AllDirectories)
+                .Select(f => (File: f, f.Length, When: LastUse(f)))
+                .ToList();
+
+            var total = files.Sum(f => f.Length);
+            if (total <= DiskCacheBudgetBytes) return;
+
+            var removed = 0;
+            foreach (var entry in files.OrderBy(f => f.When))
+            {
+                if (total <= DiskCacheBudgetBytes) break;
+                try
+                {
+                    entry.File.Delete();
+                    total -= entry.Length;
+                    removed++;
+                }
+                catch { /* in use, skip */ }
+            }
+
+            if (removed > 0)
+                Debug.WriteLine($"Thumbnail cache pruned: {removed} entries, now {total / (1024 * 1024)} MB");
+        }
+        catch { /* cache is optional */ }
+    }
+
+    /// <summary>
+    /// Last access where the filesystem records it, last write otherwise. Windows often
+    /// has last-access updates disabled, so the fallback is the normal case.
+    /// </summary>
+    private static DateTime LastUse(FileInfo f)
+    {
+        var access = f.LastAccessTimeUtc;
+        return access > f.LastWriteTimeUtc ? access : f.LastWriteTimeUtc;
     }
 
     /// <summary>

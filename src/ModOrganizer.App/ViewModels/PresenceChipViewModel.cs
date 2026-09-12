@@ -18,16 +18,25 @@ public sealed class PresenceChipViewModel
         "#EC407A", "#26C6DA", "#9CCC65", "#AB47BC", "#42A5F5"
     };
 
-    public PresenceChipViewModel(PresenceState p)
+    /// <summary>True for the entry representing the current user.</summary>
+    public bool IsSelf { get; }
+
+    public PresenceChipViewModel(PresenceState p, string? viewingModName = null, bool isSelf = false)
     {
         UserId = p.UserId;
         DisplayName = p.DisplayName;
         ViewingModId = p.ViewingModId;
+        IsSelf = isSelf;
         Initials = MakeInitials(DisplayName);
         Brush = MakeBrush(DisplayName);
+
+        var who = isSelf ? "du" : DisplayName;
+
+        // The mod id alone told the user nothing; the name is resolved by the caller,
+        // which is the only place that knows the loaded cards.
         Tooltip = p.ViewingModId.HasValue
-            ? $"{DisplayName} · schaut Mod #{p.ViewingModId} an"
-            : DisplayName;
+            ? $"{who} · sieht gerade {viewingModName ?? $"Mod #{p.ViewingModId}"} an"
+            : $"{who} · online";
     }
 
     private static string MakeInitials(string name)

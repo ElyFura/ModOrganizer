@@ -802,8 +802,17 @@ static int ListRoots(string connectionString)
     }
 
     Console.WriteLine();
-    var users = conn.Query<(Guid Id, string? Email, string? Name)>(
-        "SELECT id AS Id, email AS Email, display_name AS Name FROM users ORDER BY created_at").ToList();
+    // Also report the Penumbra snapshot each user shares, since "I cannot see what the
+    // other one has enabled" is almost always a missing or stale row here.
+    var users = conn.Query<(Guid Id, string? Email, string? Name, DateTime? PenumbraAt, int PenumbraBytes)>(
+        """
+        SELECT u.id AS Id, u.email AS Email, u.display_name AS Name,
+               s.updated_at AS PenumbraAt,
+               COALESCE(length(s.payload_json), 0) AS PenumbraBytes
+        FROM users u
+        LEFT JOIN penumbra_user_state s ON s.user_id = u.id
+        ORDER BY u.created_at
+        """).ToList();
     Console.WriteLine($"users: {users.Count}");
 
     // Per-user mappings: the whole point is that the same library resolves to a
@@ -811,6 +820,9 @@ static int ListRoots(string connectionString)
     foreach (var u in users)
     {
         Console.WriteLine($"  {u.Name} <{u.Email}>  {u.Id}");
+        Console.WriteLine(u.PenumbraAt is null
+            ? "      Penumbra: kein Abgleich vorhanden"
+            : $"      Penumbra: {u.PenumbraBytes} Zeichen, Stand {u.PenumbraAt:yyyy-MM-dd HH:mm}");
         var maps = conn.Query<(long RootId, string Name, string Path, bool Enabled)>(
             """
             SELECT rp.root_id AS RootId, r.display_name AS Name, rp.path AS Path, rp.enabled AS Enabled

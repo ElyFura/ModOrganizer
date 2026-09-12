@@ -49,27 +49,40 @@ public sealed class HealthChecker
                    ) AS top_images,
                    COUNT(f.id) FILTER (
                        WHERE f.kind = @pmpKind OR f.kind = @ttmpKind
-                   ) AS mod_files
+                   ) AS mod_files,
+                   -- The scanner hashes every archive it can open and stores NULL when the
+                   -- read failed, so a missing hash is the cheapest available signal for
+                   -- "this file is not usable". A zero-byte archive is the other one.
+                   COUNT(f.id) FILTER (
+                       WHERE (f.kind = @pmpKind OR f.kind = @ttmpKind)
+                         AND (f.xxhash64 IS NULL OR f.size_bytes = 0)
+                   ) AS broken_files
             FROM target t
             LEFT JOIN mod_files f ON f.mod_id = t.id
             GROUP BY t.id
         ),
         issues AS (
             SELECT mod_id, @noImageKind::int AS kind, @warn::int AS severity,
-                   'No preview image in mod folder'::text AS detail
+                   'Kein Vorschaubild im Mod-Ordner'::text AS detail
             FROM counts WHERE top_images = 0
 
             UNION ALL
 
             SELECT mod_id, @multiImageKind::int, @info::int,
-                   top_images || ' preview images'
+                   top_images || ' Vorschaubilder'
             FROM counts WHERE top_images > 1
 
             UNION ALL
 
             SELECT mod_id, @orphanImageKind::int, @info::int,
-                   'Image without a .pmp/.ttmp2'::text
+                   'Bild ohne .pmp/.ttmp2'::text
             FROM counts WHERE top_images > 0 AND mod_files = 0
+
+            UNION ALL
+
+            SELECT mod_id, @brokenArchiveKind::int, @error::int,
+                   broken_files || ' Archiv(e) nicht lesbar oder leer'
+            FROM counts WHERE broken_files > 0
         )
         INSERT INTO health_issues(mod_id, kind, severity, detail)
         SELECT mod_id, kind, severity, detail FROM issues
@@ -97,8 +110,10 @@ public sealed class HealthChecker
         noImageKind = (int)HealthIssueKind.NoImage,
         multiImageKind = (int)HealthIssueKind.MultiImage,
         orphanImageKind = (int)HealthIssueKind.OrphanImage,
+        brokenArchiveKind = (int)HealthIssueKind.BrokenArchive,
         warn = (int)HealthSeverity.Warn,
-        info = (int)HealthSeverity.Info
+        info = (int)HealthSeverity.Info,
+        error = (int)HealthSeverity.Error
     };
 
     private static string IssuesSql(bool byRoot) => $"""

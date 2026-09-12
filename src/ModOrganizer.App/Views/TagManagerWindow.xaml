@@ -5,7 +5,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="Manage Tags" Height="660" Width="900"
+        Title="Tags verwalten" Height="660" Width="900"
         Background="{DynamicResource Bg0}" Foreground="{DynamicResource Text}"
         FontFamily="Segoe UI Variable, Segoe UI" FontSize="13"
         d:DataContext="{d:DesignInstance Type=vm:TagManagerViewModel}"

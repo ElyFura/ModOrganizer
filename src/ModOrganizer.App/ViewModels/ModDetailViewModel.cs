@@ -139,7 +139,11 @@ public sealed partial class ModDetailViewModel : ObservableObject
         var status = PenumbraStatus.NotInstalled;
         foreach (var u in users.OrderByDescending(x => x.IsSelf).ThenBy(x => x.DisplayName))
         {
-            var prefix = u.IsSelf ? "du" : u.DisplayName;
+            // Same rule as the gallery: name the user, and say how old their state is once
+            // it is old enough to mislead.
+            var prefix = u.IsSelf
+                ? "du"
+                : u.IsStale ? $"{u.DisplayName}, {u.AgeText}" : u.DisplayName;
 
             // All matches, mirroring the gallery: a mod can exist twice in Penumbra and
             // only the second copy may be the enabled one.

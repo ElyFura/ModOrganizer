@@ -12,6 +12,32 @@ public sealed class PenumbraUserSnapshot
     public string? ColorHex { get; set; }
     public bool IsSelf { get; set; }
     public PenumbraSnapshot Snapshot { get; set; } = new();
+
+    /// <summary>
+    /// When this user last uploaded their Penumbra state. Shown in the UI because a
+    /// snapshot that is days old looks exactly like a current one otherwise - and acting
+    /// on stale "is enabled" information is worse than having none.
+    /// </summary>
+    public DateTimeOffset? UpdatedAt { get; set; }
+
+    /// <summary>Short, human wording for <see cref="UpdatedAt"/>.</summary>
+    public string AgeText
+    {
+        get
+        {
+            if (IsSelf) return "jetzt";
+            if (UpdatedAt is not { } at) return "unbekannt";
+
+            var age = DateTimeOffset.UtcNow - at;
+            if (age < TimeSpan.FromMinutes(2)) return "gerade eben";
+            if (age < TimeSpan.FromHours(1)) return $"vor {(int)age.TotalMinutes} Min.";
+            if (age < TimeSpan.FromDays(1)) return $"vor {(int)age.TotalHours} Std.";
+            return $"vor {(int)age.TotalDays} Tag(en)";
+        }
+    }
+
+    /// <summary>Old enough that the user should be told rather than quietly trusting it.</summary>
+    public bool IsStale => !IsSelf && (UpdatedAt is null || DateTimeOffset.UtcNow - UpdatedAt > TimeSpan.FromDays(1));
 }
 
 /// <summary>
@@ -55,12 +81,13 @@ public sealed class PenumbraSyncService
     {
         var selfId = _user.UserId;
         using var conn = _store.Open();
-        var rows = conn.Query<(Guid UserId, string DisplayName, string? ColorHex, string PayloadJson)>(
+        var rows = conn.Query<(Guid UserId, string DisplayName, string? ColorHex, string PayloadJson, DateTime UpdatedAt)>(
             """
             SELECT s.user_id    AS UserId,
                    COALESCE(u.display_name, u.email, '?') AS DisplayName,
                    u.color_hex  AS ColorHex,
-                   s.payload_json AS PayloadJson
+                   s.payload_json AS PayloadJson,
+                   s.updated_at AS UpdatedAt
             FROM penumbra_user_state s
             LEFT JOIN users u ON u.id = s.user_id
             ORDER BY s.updated_at DESC
@@ -85,6 +112,7 @@ public sealed class PenumbraSyncService
                 DisplayName = r.DisplayName,
                 ColorHex = r.ColorHex,
                 IsSelf = selfId == r.UserId,
+                UpdatedAt = new DateTimeOffset(DateTime.SpecifyKind(r.UpdatedAt, DateTimeKind.Utc)),
                 Snapshot = snap
             });
         }

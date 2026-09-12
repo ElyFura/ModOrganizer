@@ -50,7 +50,7 @@ public partial class ImportDialog : Window
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to import {row.FileName}:\n{ex.Message}",
+                MessageBox.Show($"Import von {row.FileName} fehlgeschlagen:\n{ex.Message}",
                     "Import error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }

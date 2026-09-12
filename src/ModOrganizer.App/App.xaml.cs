@@ -124,6 +124,7 @@ public partial class App : Application
                 services.AddSingleton<SmartCollectionService>();
                 services.AddSingleton<PenumbraService>();
                 services.AddSingleton<PenumbraSyncService>();
+                services.AddSingleton<PenumbraWatcher>();
                 services.AddSingleton<MoveService>();
                 services.AddSingleton<ArchiveService>(_ => new ArchiveService());
                 services.AddSingleton<DeleteService>();
@@ -231,11 +232,33 @@ public partial class App : Application
         watcher.RescanCompleted += (_, _) => Dispatcher.Invoke(mainVm.RefreshAfterScan);
         watcher.Start();
 
+        // Keep the shared Penumbra snapshot current. Pushing only at startup meant the
+        // other user saw a state that was as old as the last time this app was launched.
+        var penumbraWatcher = _host.Services.GetRequiredService<PenumbraWatcher>();
+        penumbraWatcher.SnapshotPushed += (_, _) => Dispatcher.Invoke(() => _ = mainVm.ReloadPenumbraAsync());
+        penumbraWatcher.Start();
+
+        // Housekeeping, off the UI thread and deliberately after everything else is up:
+        // the cache only needs trimming once per session and nothing waits on it.
+        var thumbs = _host.Services.GetRequiredService<ThumbnailCache>();
+        _ = Task.Run(() =>
+        {
+            try { thumbs.PruneDiskCache(); }
+            catch (Exception ex) { Log.Warning(ex, "Thumbnail cache pruning failed"); }
+        });
+
         // Phase C: realtime sync — partner's DB changes pushed to our UI
         if (supabase.IsAuthenticated)
         {
             var hub = _host.Services.GetRequiredService<RealtimeHub>();
             hub.OnAnyChange(() => Dispatcher.Invoke(mainVm.RefreshAfterScan));
+
+            // Surface the link state, so a socket that died on standby is visible instead
+            // of just looking like nobody changed anything.
+            mainVm.RealtimeEnabled = true;
+            mainVm.RealtimeConnected = hub.IsConnected;
+            hub.ConnectionChanged += (_, connected) =>
+                Dispatcher.Invoke(() => mainVm.RealtimeConnected = connected);
 
             // Phase 4A: @mention broadcast listener
             var mentions = _host.Services.GetRequiredService<MentionBroadcaster>();

@@ -35,6 +35,9 @@ public sealed class PresenceService : IAsyncDisposable
 
     public IReadOnlyDictionary<Guid, PresenceState> OnlineUsers => _users;
 
+    /// <summary>The current user's id, so the UI can mark "you" among the online users.</summary>
+    public Guid? SelfId => _user.UserId;
+
     public async Task StartAsync()
     {
         if (_supabase.Client?.Realtime is null || _user.UserId is not Guid uid) return;

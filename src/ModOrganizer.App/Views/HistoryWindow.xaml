@@ -14,7 +14,7 @@
         <Border Grid.Row="0" Background="{DynamicResource Bg1}" Padding="24,18"
                 BorderBrush="{DynamicResource Border1}" BorderThickness="0,0,0,1">
             <DockPanel>
-                <Button DockPanel.Dock="Right" Content="Reload" Click="Reload_Click" />
+                <Button DockPanel.Dock="Right" Content="Neu laden" Click="Reload_Click" />
                 <StackPanel>
                     <TextBlock Text="Verlauf" Style="{DynamicResource H1}" />
                     <TextBlock Text="Letzte Aktionen mit Möglichkeit zum Rückgängig-Machen" Style="{DynamicResource Caption}" Margin="0,3,0,0" />
@@ -27,7 +27,7 @@
                   RowDetailsVisibilityMode="Collapsed">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Zeit" Binding="{Binding TimeText}" Width="120" />
-                <DataGridTextColumn Header="User" Binding="{Binding UserName}" Width="120" />
+                <DataGridTextColumn Header="Benutzer" Binding="{Binding UserName}" Width="120" />
                 <DataGridTextColumn Header="Aktion" Binding="{Binding KindText}" Width="120" />
                 <DataGridTextColumn Header="Mod" Binding="{Binding ModName}" Width="*" />
                 <DataGridTemplateColumn Header="" Width="120">

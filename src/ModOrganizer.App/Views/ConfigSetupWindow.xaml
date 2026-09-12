@@ -13,13 +13,13 @@
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Margin="0,0,0,18">
-            <TextBlock Text="First-time Setup" Style="{DynamicResource H1}" />
+            <TextBlock Text="Ersteinrichtung" Style="{DynamicResource H1}" />
             <TextBlock Text="Konfiguriere die Supabase/Postgres-Verbindung. Beide Werte findest du in deinem self-hosted Supabase Dashboard."
                        Style="{DynamicResource Caption}" Margin="0,4,0,0" TextWrapping="Wrap" />
         </StackPanel>
 
         <StackPanel Grid.Row="1">
-            <TextBlock Text="POSTGRES CONNECTION STRING" Style="{DynamicResource Label}" Margin="0,0,0,6" />
+            <TextBlock Text="POSTGRES-VERBINDUNG" Style="{DynamicResource Label}" Margin="0,0,0,6" />
             <TextBox x:Name="ConnBox" Height="60" AcceptsReturn="True" TextWrapping="Wrap"
                      FontFamily="Cascadia Code, Consolas" />
             <TextBlock Style="{DynamicResource Caption}" Margin="0,4,0,0" TextWrapping="Wrap">

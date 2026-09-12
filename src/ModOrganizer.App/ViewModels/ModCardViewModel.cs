@@ -114,6 +114,26 @@ public sealed partial class ModCardViewModel : ObservableObject
     public int ImageCount => Model.ImageCount;
     public bool IsMissing => Model.IsMissing;
 
+    // ---- who is looking at this mod right now ----
+
+    /// <summary>
+    /// Set from presence: the other user currently has this mod's detail window open.
+    /// Knowing that before you rename or delete it is the whole point.
+    /// </summary>
+    [ObservableProperty] private string? _viewedByName;
+
+    [ObservableProperty] private Brush? _viewedByBrush;
+
+    public bool IsViewedByOther => !string.IsNullOrEmpty(ViewedByName);
+
+    public string ViewedByTooltip => $"{ViewedByName} sieht diesen Mod gerade an";
+
+    partial void OnViewedByNameChanged(string? value)
+    {
+        OnPropertyChanged(nameof(IsViewedByOther));
+        OnPropertyChanged(nameof(ViewedByTooltip));
+    }
+
     /// <summary>
     /// How long the folder has been gone. The age is the whole point: "seit heute" is a
     /// sync that may still be running, "seit 12 Tagen" is a real deletion.

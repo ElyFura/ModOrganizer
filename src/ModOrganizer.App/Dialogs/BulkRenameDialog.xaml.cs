@@ -43,13 +43,13 @@ public partial class BulkRenameDialog : Window
         if (_plan is null) BuildPreview();
         if (_plan is null || _plan.Entries.Count == 0)
         {
-            MessageBox.Show("Nothing to do.", "Bulk Rename", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Nichts zu tun.", "Bulk Rename", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
         var applicable = _plan.Entries.Count(x => x.Enabled && x.Conflict is null);
         if (applicable == 0)
         {
-            MessageBox.Show("No applicable changes (conflicts/invalid names).", "Bulk Rename", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Keine anwendbaren Änderungen (Konflikte oder ungültige Namen).", "Bulk Rename", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         var result = _svc.ExecuteBulk(_plan);
