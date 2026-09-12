@@ -3,6 +3,7 @@ using ModOrganizer.Core.Archive;
 using ModOrganizer.Core.Models;
 using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
+using ModOrganizer.Core.Scanning;
 
 namespace ModOrganizer.Core.Management;
 
@@ -34,7 +35,7 @@ public sealed class DeleteService
             WHERE m.id=@m
             """, new { m = modId, uid = _user?.UserId });
 
-        var folderPath = Path.Combine(row.RootPath, row.CatName, row.FolderName);
+        var folderPath = Path.Combine(RootNotMappedException.Require(row.RootPath), row.CatName, row.FolderName);
 
         if (archiveBeforeDelete && Directory.Exists(folderPath))
         {
@@ -69,7 +70,7 @@ public sealed class DeleteService
             FROM categories c WHERE c.id=@id
             """, new { id = categoryId, uid = _user?.UserId });
 
-        var folderPath = Path.Combine(row.RootPath, row.Name);
+        var folderPath = Path.Combine(RootNotMappedException.Require(row.RootPath), row.Name);
         bool recycled = true;
         if (Directory.Exists(folderPath))
             recycled = RecycleBin.SendToRecycleBin(folderPath);

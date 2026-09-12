@@ -2,6 +2,7 @@ using Dapper;
 using ModOrganizer.Core.Models;
 using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
+using ModOrganizer.Core.Scanning;
 
 namespace ModOrganizer.Core.Categories;
 
@@ -155,8 +156,9 @@ public sealed class CategoryService
 
         if (string.Equals(row.OldName, newName, StringComparison.Ordinal)) return;
 
-        var oldPath = Path.Combine(row.RootPath, row.OldName);
-        var newPath = Path.Combine(row.RootPath, newName);
+        var rootPath = RootNotMappedException.Require(row.RootPath);
+        var oldPath = Path.Combine(rootPath, row.OldName);
+        var newPath = Path.Combine(rootPath, newName);
 
         // "Gear" -> "gear" is a real rename, but Windows paths are case-insensitive, so
         // Directory.Exists(newPath) is true for the very folder we are renaming. Without
@@ -270,7 +272,7 @@ public sealed class CategoryService
             WHERE c.id=@id
             """, new { id = categoryId, uid = _user?.UserId });
 
-        var folderPath = Path.Combine(row.RootPath, row.Name);
+        var folderPath = Path.Combine(RootNotMappedException.Require(row.RootPath), row.Name);
 
         // Check emptiness before opening the transaction — bailing out from inside one
         // just to roll it back is pointless work against a remote database.
@@ -330,8 +332,8 @@ public sealed class CategoryService
         if (source.RootId != target.RootId)
             throw new InvalidOperationException("Cross-root merge not supported.");
 
-        var sourcePath = Path.Combine(source.RootPath, source.Name);
-        var targetPath = Path.Combine(target.RootPath, target.Name);
+        var sourcePath = Path.Combine(RootNotMappedException.Require(source.RootPath), source.Name);
+        var targetPath = Path.Combine(RootNotMappedException.Require(target.RootPath), target.Name);
 
         var plan = new CategoryMergePlan
         {

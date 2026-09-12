@@ -298,20 +298,18 @@ public partial class App : Application
         Log.Information("MainWindow shown");
     }
 
-    protected override async void OnExit(ExitEventArgs e)
+    protected override void OnExit(ExitEventArgs e)
     {
+        // Deliberately not async void. WPF does not await OnExit, so an awaited shutdown
+        // continues after the process has already begun tearing down - the log never gets
+        // flushed, which is exactly what you need after a crash. Blocking with a bounded
+        // wait costs a moment on exit and always finishes the job.
         if (_host is not null)
         {
             try
             {
-                await _host.StopAsync();
-
-                // DisposeAsync, not Dispose: several singletons (SupabaseClientProvider,
-                // RealtimeHub) implement only IAsyncDisposable, and the synchronous
-                // ServiceProvider.Dispose() throws on those. IHost itself only declares
-                // IDisposable, so go through the interface explicitly.
-                if (_host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync();
-                else _host.Dispose();
+                if (!ShutdownHostAsync().Wait(TimeSpan.FromSeconds(5)))
+                    Log.Warning("Host shutdown timed out after 5s");
             }
             catch (Exception ex)
             {
@@ -320,5 +318,17 @@ public partial class App : Application
         }
         Log.CloseAndFlush();
         base.OnExit(e);
+    }
+
+    private async Task ShutdownHostAsync()
+    {
+        await _host!.StopAsync().ConfigureAwait(false);
+
+        // DisposeAsync, not Dispose: several singletons (SupabaseClientProvider,
+        // RealtimeHub) implement only IAsyncDisposable, and the synchronous
+        // ServiceProvider.Dispose() throws on those. IHost itself only declares
+        // IDisposable, so go through the interface explicitly.
+        if (_host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync().ConfigureAwait(false);
+        else _host.Dispose();
     }
 }

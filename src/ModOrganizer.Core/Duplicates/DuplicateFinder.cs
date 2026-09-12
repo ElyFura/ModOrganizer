@@ -76,6 +76,9 @@ public sealed class DuplicateFinder
         ) f ON f.mod_id = m.id
         WHERE m.deleted_at IS NULL AND m.is_missing = FALSE
           AND (@r::bigint IS NULL OR c.root_id = @r::bigint)
+          -- Skip libraries this user has not mapped: their absolute path would be NULL,
+          -- and the view compares folders on disk.
+          AND mo_root_path(c.root_id, @uid) IS NOT NULL
         """;
 
     private List<DuplicateModRow> LoadCandidates(long? rootId)

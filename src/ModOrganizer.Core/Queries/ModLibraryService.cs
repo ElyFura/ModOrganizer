@@ -497,7 +497,7 @@ public sealed class ModLibraryService
     {
         using var conn = _store.Open();
 
-        var rows = conn.Query<(long Id, long CategoryId, string CategoryName, long RootId, string RootPath,
+        var rows = conn.Query<(long Id, long CategoryId, string CategoryName, long RootId, string? RootPath,
                                string FolderName, string? DisplayName, int Rating,
                                string CreatedAt, string UpdatedAt, string? DeletedAt, long Size)>(
             """
@@ -520,7 +520,12 @@ public sealed class ModLibraryService
                 Id = row.Id, CategoryId = row.CategoryId, CategoryName = row.CategoryName,
                 RootId = row.RootId,
                 FolderName = row.FolderName, DisplayName = row.DisplayName,
-                FolderAbsPath = Path.Combine(row.RootPath, row.CategoryName, row.FolderName),
+                // The trash spans every library, including ones this user has not mapped.
+                // Restoring only flips database flags, so such a row stays useful - it
+                // just has no local path to show.
+                FolderAbsPath = string.IsNullOrEmpty(row.RootPath)
+                    ? ""
+                    : Path.Combine(row.RootPath, row.CategoryName, row.FolderName),
                 Rating = row.Rating,
                 CreatedAt = ParseDate(row.CreatedAt),
                 UpdatedAt = ParseDate(row.UpdatedAt),

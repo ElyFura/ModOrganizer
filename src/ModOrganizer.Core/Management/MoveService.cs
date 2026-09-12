@@ -2,6 +2,7 @@ using Dapper;
 using ModOrganizer.Core.Models;
 using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
+using ModOrganizer.Core.Scanning;
 
 namespace ModOrganizer.Core.Management;
 
@@ -44,7 +45,7 @@ public sealed class MoveService
             FROM categories c WHERE c.id=@id
             """, new { id = targetCategoryId, uid = _user?.UserId });
 
-        var targetCategoryPath = Path.Combine(target.RootPath, target.Name);
+        var targetCategoryPath = Path.Combine(RootNotMappedException.Require(target.RootPath), target.Name);
         var plan = new MovePlan();
 
         foreach (var modId in modIds.Distinct())
@@ -57,7 +58,7 @@ public sealed class MoveService
                 WHERE m.id=@m
                 """, new { m = modId, uid = _user?.UserId });
 
-            var from = Path.Combine(src.RootPath, src.CatName, src.FromFolder);
+            var from = Path.Combine(RootNotMappedException.Require(src.RootPath), src.CatName, src.FromFolder);
             var to = Path.Combine(targetCategoryPath, src.FromFolder);
 
             if (string.Equals(from, to, StringComparison.OrdinalIgnoreCase)) continue;

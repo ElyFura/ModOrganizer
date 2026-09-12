@@ -3,6 +3,7 @@ using Dapper;
 using ModOrganizer.Core.Models;
 using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
+using ModOrganizer.Core.Scanning;
 
 namespace ModOrganizer.Core.Management;
 
@@ -64,8 +65,9 @@ public sealed class RenameService
             WHERE m.id=@m
             """, new { m = modId, uid = _user?.UserId });
 
-        var oldFolderPath = Path.Combine(row.RootPath, row.CatName, row.OldFolder);
-        var newFolderPath = Path.Combine(row.RootPath, row.CatName, newFolderName);
+        var rootPath = RootNotMappedException.Require(row.RootPath);
+        var oldFolderPath = Path.Combine(rootPath, row.CatName, row.OldFolder);
+        var newFolderPath = Path.Combine(rootPath, row.CatName, newFolderName);
 
         var plan = new RenamePlan
         {
@@ -312,7 +314,7 @@ public sealed class RenameService
                 continue;
             }
 
-            var newPath = Path.Combine(row.RootPath, row.CatName, newName);
+            var newPath = Path.Combine(RootNotMappedException.Require(row.RootPath), row.CatName, newName);
             string? conflict = null;
             if (Directory.Exists(newPath)) conflict = "target exists";
 

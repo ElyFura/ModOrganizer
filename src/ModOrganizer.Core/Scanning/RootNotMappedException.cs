@@ -20,4 +20,20 @@ public sealed class RootNotMappedException : Exception
         RootId = rootId;
         RootName = rootName;
     }
+
+    private RootNotMappedException()
+        : base("Diese Bibliothek ist auf diesem PC keinem Ordner zugeordnet.\n\n" +
+               "Öffne Einstellungen und wähle den lokalen Ordner dafür.")
+    {
+        RootName = "";
+    }
+
+    /// <summary>
+    /// Guards a path that came out of <c>mo_root_path</c>. That function returns NULL for a
+    /// library the current user has not mapped, and every caller then builds a filesystem
+    /// path from it - so without this the failure surfaces deep inside Path.Combine as an
+    /// ArgumentNullException instead of as the one thing the user can actually fix.
+    /// </summary>
+    public static string Require(string? rootPath) =>
+        string.IsNullOrEmpty(rootPath) ? throw new RootNotMappedException() : rootPath;
 }

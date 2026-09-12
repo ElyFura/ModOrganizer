@@ -846,7 +846,6 @@ static int Missing(string connectionString, bool purge, int olderThanDays)
         var count = library.CountMissing(root.Id);
         Console.WriteLine($"== #{root.Id} {root.DisplayName} ==  {count} nicht mehr im Ordner");
         total += count;
-        if (count == 0) continue;
 
         var gone = library.GetMods(new ModQuery { RootId = root.Id, Missing = MissingFilter.Only });
         foreach (var m in gone.OrderBy(m => m.CategoryName).ThenBy(m => m.FolderName))

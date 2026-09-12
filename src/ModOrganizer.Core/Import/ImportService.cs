@@ -1,6 +1,7 @@
 using Dapper;
 using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
+using ModOrganizer.Core.Scanning;
 
 namespace ModOrganizer.Core.Import;
 
@@ -102,7 +103,7 @@ public sealed class ImportService
             FROM categories c WHERE c.id=@id
             """, new { id = categoryId, uid = _user?.UserId });
 
-        var destFolder = Path.Combine(row.RootPath, row.CatName, folderName);
+        var destFolder = Path.Combine(RootNotMappedException.Require(row.RootPath), row.CatName, folderName);
         Directory.CreateDirectory(destFolder);
 
         var destFile = Path.Combine(destFolder, Path.GetFileName(sourcePath));
