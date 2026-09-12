@@ -5,6 +5,7 @@ using Dapper;
 using Npgsql;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Models;
 using ModOrganizer.Core.Pmp;
 using ModOrganizer.Core.Storage;
@@ -25,12 +26,15 @@ public sealed class ModScanner
 {
     private readonly DatabaseStore _store;
     private readonly PmpInspector _pmpInspector;
+    private readonly IUserContext? _user;
     private readonly ILogger<ModScanner> _log;
 
-    public ModScanner(DatabaseStore store, PmpInspector? pmpInspector = null, ILogger<ModScanner>? log = null)
+    public ModScanner(DatabaseStore store, PmpInspector? pmpInspector = null,
+        IUserContext? user = null, ILogger<ModScanner>? log = null)
     {
         _store = store;
         _pmpInspector = pmpInspector ?? new PmpInspector();
+        _user = user;
         _log = log ?? NullLogger<ModScanner>.Instance;
     }
 
@@ -47,17 +51,28 @@ public sealed class ModScanner
         var sw = Stopwatch.StartNew();
         using var conn = _store.Open();
 
-        var root = conn.QuerySingleOrDefault<(long Id, string Path, string DisplayName, bool Enabled)>(
-            "SELECT id AS Id, path AS Path, display_name AS DisplayName, enabled AS Enabled FROM roots WHERE id=@id",
-            new { id = rootId });
+        // The path is resolved for the CURRENT user: the same logical root lives at a
+        // different mount point on every machine that syncs the folder.
+        var root = conn.QuerySingleOrDefault<(long Id, string? Path, string DisplayName)>(
+            """
+            SELECT id AS Id, mo_root_path(id, @uid) AS Path, display_name AS DisplayName
+            FROM roots WHERE id=@id
+            """,
+            new { id = rootId, uid = _user?.UserId });
 
         if (root.Id == 0)
             throw new InvalidOperationException($"Root {rootId} not found.");
+
+        if (string.IsNullOrWhiteSpace(root.Path))
+            throw new RootNotMappedException(rootId, root.DisplayName);
+
         if (!Directory.Exists(root.Path))
-            throw new DirectoryNotFoundException($"Root path '{root.Path}' does not exist.");
+            throw new DirectoryNotFoundException(
+                $"Der Ordner für „{root.DisplayName}\" existiert auf diesem PC nicht:\n{root.Path}\n\n" +
+                "Unter Einstellungen kannst du den Ordner neu zuordnen.");
 
         // 1. Read the whole tree first. No DB work while we are I/O bound on the disk.
-        var disk = ReadFromDisk(root.Path, progress, ct);
+        var disk = ReadFromDisk(root.Path!, progress, ct);
 
         var filesSeen = disk.Sum(c => c.Mods.Sum(m => m.Files.Count));
         var modsSeen = disk.Sum(c => c.Mods.Count);

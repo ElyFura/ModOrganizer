@@ -1,5 +1,6 @@
 using Dapper;
 using ModOrganizer.Core.Models;
+using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
 
 namespace ModOrganizer.Core.Categories;
@@ -26,12 +27,23 @@ public sealed class CategoryService
 {
     private readonly DatabaseStore _store;
     private readonly Management.FileSystemActivityGate? _gate;
+    private readonly IUserContext? _user;
 
-    public CategoryService(DatabaseStore store, Management.FileSystemActivityGate? gate = null)
+    public CategoryService(DatabaseStore store, Management.FileSystemActivityGate? gate = null,
+        IUserContext? user = null)
     {
         _store = store;
         _gate = gate;
+        _user = user;
     }
+
+    /// <summary>Resolves a root to the folder THIS user has it mounted at.</summary>
+    private string RootPathOf(Npgsql.NpgsqlConnection conn, long rootId) =>
+        conn.QuerySingleOrDefault<string>("SELECT mo_root_path(@r, @uid)",
+            new { r = rootId, uid = _user?.UserId })
+        ?? throw new InvalidOperationException(
+            "Für diese Bibliothek ist auf diesem PC kein Ordner zugeordnet. " +
+            "Ordne sie unter Einstellungen zu.");
 
     public long Add(long rootId, string name, string? iconName = null, string? colorHex = null)
     {
@@ -39,7 +51,7 @@ public sealed class CategoryService
         using var _suppress = _gate?.Suppress();
         using var conn = _store.Open();
 
-        var rootPath = conn.QuerySingle<string>("SELECT path FROM roots WHERE id=@r", new { r = rootId });
+        var rootPath = RootPathOf(conn, rootId);
         var target = Path.Combine(rootPath, name);
         if (Directory.Exists(target))
             throw new InvalidOperationException($"Folder '{target}' already exists.");
@@ -96,8 +108,7 @@ public sealed class CategoryService
             if (existing.HasValue)
             {
                 // The row may exist while the folder does not (a category marked missing).
-                var rootPath = conn.QuerySingle<string>(
-                    "SELECT path FROM roots WHERE id=@r", new { r = rootId });
+                var rootPath = RootPathOf(conn, rootId);
                 var folder = Path.Combine(rootPath, name.Trim());
 
                 if (!Directory.Exists(folder))
@@ -136,10 +147,11 @@ public sealed class CategoryService
 
         var row = conn.QuerySingle<(long RootId, string OldName, string RootPath)>(
             """
-            SELECT c.root_id AS RootId, c.name AS OldName, r.path AS RootPath
-            FROM categories c JOIN roots r ON r.id=c.root_id
+            SELECT c.root_id AS RootId, c.name AS OldName,
+                   mo_root_path(c.root_id, @uid) AS RootPath
+            FROM categories c
             WHERE c.id=@id
-            """, new { id = categoryId });
+            """, new { id = categoryId, uid = _user?.UserId });
 
         if (string.Equals(row.OldName, newName, StringComparison.Ordinal)) return;
 
@@ -253,10 +265,10 @@ public sealed class CategoryService
 
         var row = conn.QuerySingle<(string RootPath, string Name)>(
             """
-            SELECT r.path AS RootPath, c.name AS Name
-            FROM categories c JOIN roots r ON r.id=c.root_id
+            SELECT mo_root_path(c.root_id, @uid) AS RootPath, c.name AS Name
+            FROM categories c
             WHERE c.id=@id
-            """, new { id = categoryId });
+            """, new { id = categoryId, uid = _user?.UserId });
 
         var folderPath = Path.Combine(row.RootPath, row.Name);
 
@@ -306,14 +318,14 @@ public sealed class CategoryService
         using var conn = _store.Open();
         var source = conn.QuerySingle<(long RootId, string Name, string RootPath)>(
             """
-            SELECT c.root_id AS RootId, c.name AS Name, r.path AS RootPath
-            FROM categories c JOIN roots r ON r.id=c.root_id WHERE c.id=@id
-            """, new { id = sourceCategoryId });
+            SELECT c.root_id AS RootId, c.name AS Name, mo_root_path(c.root_id, @uid) AS RootPath
+            FROM categories c WHERE c.id=@id
+            """, new { id = sourceCategoryId, uid = _user?.UserId });
         var target = conn.QuerySingle<(long RootId, string Name, string RootPath)>(
             """
-            SELECT c.root_id AS RootId, c.name AS Name, r.path AS RootPath
-            FROM categories c JOIN roots r ON r.id=c.root_id WHERE c.id=@id
-            """, new { id = targetCategoryId });
+            SELECT c.root_id AS RootId, c.name AS Name, mo_root_path(c.root_id, @uid) AS RootPath
+            FROM categories c WHERE c.id=@id
+            """, new { id = targetCategoryId, uid = _user?.UserId });
 
         if (source.RootId != target.RootId)
             throw new InvalidOperationException("Cross-root merge not supported.");

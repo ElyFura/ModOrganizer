@@ -1,5 +1,6 @@
 using Dapper;
 using ModOrganizer.Core.Models;
+using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
 
 namespace ModOrganizer.Core.Management;
@@ -24,11 +25,14 @@ public sealed class MoveService
 {
     private readonly DatabaseStore _store;
     private readonly FileSystemActivityGate? _gate;
+    private readonly IUserContext? _user;
 
-    public MoveService(DatabaseStore store, FileSystemActivityGate? gate = null)
+    public MoveService(DatabaseStore store, FileSystemActivityGate? gate = null,
+        IUserContext? user = null)
     {
         _store = store;
         _gate = gate;
+        _user = user;
     }
 
     public MovePlan CreatePlan(IEnumerable<long> modIds, long targetCategoryId)
@@ -36,9 +40,9 @@ public sealed class MoveService
         using var conn = _store.Open();
         var target = conn.QuerySingle<(long RootId, string Name, string RootPath)>(
             """
-            SELECT c.root_id AS RootId, c.name AS Name, r.path AS RootPath
-            FROM categories c JOIN roots r ON r.id=c.root_id WHERE c.id=@id
-            """, new { id = targetCategoryId });
+            SELECT c.root_id AS RootId, c.name AS Name, mo_root_path(c.root_id, @uid) AS RootPath
+            FROM categories c WHERE c.id=@id
+            """, new { id = targetCategoryId, uid = _user?.UserId });
 
         var targetCategoryPath = Path.Combine(target.RootPath, target.Name);
         var plan = new MovePlan();
@@ -47,11 +51,11 @@ public sealed class MoveService
         {
             var src = conn.QuerySingle<(string FromFolder, string CatName, string RootPath)>(
                 """
-                SELECT m.folder_name AS FromFolder, c.name AS CatName, r.path AS RootPath
+                SELECT m.folder_name AS FromFolder, c.name AS CatName,
+                       mo_root_path(c.root_id, @uid) AS RootPath
                 FROM mods m JOIN categories c ON c.id=m.category_id
-                            JOIN roots r ON r.id=c.root_id
                 WHERE m.id=@m
-                """, new { m = modId });
+                """, new { m = modId, uid = _user?.UserId });
 
             var from = Path.Combine(src.RootPath, src.CatName, src.FromFolder);
             var to = Path.Combine(targetCategoryPath, src.FromFolder);

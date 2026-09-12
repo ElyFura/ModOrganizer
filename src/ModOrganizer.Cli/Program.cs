@@ -47,6 +47,25 @@ if (args[0] == "tag")
         : ApplyTag(args[1], args[2], args.Skip(3).ToArray(), remove: false);
 }
 
+if (args[0] == "roots")
+{
+    if (args.Length < 2) { Console.Error.WriteLine("roots needs a connection string"); return 2; }
+
+    // "--as <user-id|email>" reports the library exactly as that user's app would see it,
+    // which is how the per-user path mapping gets verified without two PCs.
+    if (args.Length > 3 && args[2] == "--as")
+    {
+        var rest = args.Skip(4).ToArray();
+        var under = rest.SkipWhile(a => a != "--map-under").Skip(1).FirstOrDefault();
+        return RootsAsUser(args[1], args[3],
+            adopt: rest.Contains("--adopt"),
+            mapUnder: under,
+            applyMapping: rest.Contains("--apply"));
+    }
+
+    return ListRoots(args[1]);
+}
+
 if (args[0] == "penumbra")
 {
     if (args.Length < 2) { Console.Error.WriteLine("penumbra needs a connection string [collection name]"); return 2; }
@@ -194,11 +213,14 @@ static int Verify(string connectionString)
         var wildcard = library.GetMods(root.Id, searchText: "_");
         var percent = library.GetMods(root.Id, searchText: "%");
         var total = library.GetMods(root.Id).Count;
+        // An empty root proves nothing about escaping - 0 < 0 is false but correct.
+        var wildcardOk = total == 0 || wildcard.Count < total;
+        var percentOk = total == 0 || percent.Count < total;
         Console.WriteLine($"  search '_' literal : {wildcard.Count,4} rows (of {total})" +
-                          (wildcard.Count < total ? "  OK" : "  <-- WILDCARD NOT ESCAPED"));
+                          (total == 0 ? "  (leer, uebersprungen)" : wildcardOk ? "  OK" : "  <-- WILDCARD NOT ESCAPED"));
         Console.WriteLine($"  search '%' literal : {percent.Count,4} rows (of {total})" +
-                          (percent.Count < total ? "  OK" : "  <-- WILDCARD NOT ESCAPED"));
-        if (wildcard.Count >= total || percent.Count >= total) failures++;
+                          (total == 0 ? "  (leer, uebersprungen)" : percentOk ? "  OK" : "  <-- WILDCARD NOT ESCAPED"));
+        if (!wildcardOk || !percentOk) failures++;
 
         sw.Restart();
         var rated = library.GetMods(root.Id, minRating: 3);
@@ -709,4 +731,217 @@ static int PenumbraProbe(string[] names)
         Console.WriteLine();
     }
     return 0;
+}
+
+/// <summary>Lists every root, its stored path, whether that path exists here, and its content.</summary>
+static int ListRoots(string connectionString)
+{
+    var store = new DatabaseStore(new PostgresConnectionFactory(connectionString));
+    using var conn = store.Open();
+
+    var rows = conn.Query<(long Id, string Path, string DisplayName, bool Enabled, long Cats, long Mods)>(
+        """
+        SELECT r.id AS Id, r.path AS Path, r.display_name AS DisplayName, r.enabled AS Enabled,
+               (SELECT COUNT(*) FROM categories c WHERE c.root_id = r.id) AS Cats,
+               (SELECT COUNT(*) FROM mods m JOIN categories c ON c.id = m.category_id
+                 WHERE c.root_id = r.id AND m.deleted_at IS NULL) AS Mods
+        FROM roots r ORDER BY r.id
+        """).ToList();
+
+    foreach (var r in rows)
+    {
+        var here = Directory.Exists(r.Path) ? "vorhanden" : "FEHLT auf diesem PC";
+        Console.WriteLine($"#{r.Id}  {r.DisplayName}");
+        Console.WriteLine($"     path    : {r.Path}   [{here}]");
+        Console.WriteLine($"     enabled : {r.Enabled}   Kategorien: {r.Cats}   Mods: {r.Mods}");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("== Inhalt je Bibliothek ==");
+    foreach (var r in rows)
+    {
+        var content = conn.Query<(string Cat, string Folder)>(
+            """
+            SELECT c.name AS Cat, m.folder_name AS Folder
+            FROM mods m JOIN categories c ON c.id = m.category_id
+            WHERE c.root_id = @r AND m.deleted_at IS NULL
+            ORDER BY c.name, m.folder_name
+            """, new { r = r.Id }).ToList();
+
+        Console.WriteLine($"  #{r.Id} {r.DisplayName}: {content.Count} Mods");
+        foreach (var c in content.Take(8)) Console.WriteLine($"       {c.Cat}/{c.Folder}");
+        if (content.Count > 8) Console.WriteLine($"       ... und {content.Count - 8} weitere");
+    }
+
+    Console.WriteLine();
+    var users = conn.Query<(Guid Id, string? Email, string? Name)>(
+        "SELECT id AS Id, email AS Email, display_name AS Name FROM users ORDER BY created_at").ToList();
+    Console.WriteLine($"users: {users.Count}");
+
+    // Per-user mappings: the whole point is that the same library resolves to a
+    // different folder for every user.
+    foreach (var u in users)
+    {
+        Console.WriteLine($"  {u.Name} <{u.Email}>  {u.Id}");
+        var maps = conn.Query<(long RootId, string Name, string Path, bool Enabled)>(
+            """
+            SELECT rp.root_id AS RootId, r.display_name AS Name, rp.path AS Path, rp.enabled AS Enabled
+            FROM root_paths rp JOIN roots r ON r.id = rp.root_id
+            WHERE rp.user_id = @u ORDER BY rp.root_id
+            """, new { u = u.Id }).ToList();
+
+        if (maps.Count == 0) { Console.WriteLine("      (keine Zuordnungen)"); continue; }
+        foreach (var m in maps)
+            Console.WriteLine($"      #{m.RootId} {m.Name,-26} -> {m.Path}   enabled={m.Enabled}");
+    }
+
+    return 0;
+}
+
+
+/// <summary>Shows what one specific user's app would load, and can run the auto-adopt.</summary>
+static int RootsAsUser(string connectionString, string who, bool adopt,
+                       string? mapUnder = null, bool applyMapping = false)
+{
+    var store = new DatabaseStore(new PostgresConnectionFactory(connectionString));
+
+    Guid uid;
+    string? name;
+    using (var conn = store.Open())
+    {
+        var row = conn.QuerySingleOrDefault<(Guid Id, string? Name)>(
+            """
+            SELECT id AS Id, COALESCE(display_name, email) AS Name FROM users
+            WHERE id::text = @w OR email = @w OR display_name = @w
+            """, new { w = who });
+        if (row.Id == Guid.Empty) { Console.Error.WriteLine($"kein Benutzer '{who}'"); return 2; }
+        uid = row.Id; name = row.Name;
+    }
+
+    var user = new FakeUser(uid, name);
+    var roots = new RootService(store, user);
+    var library = new ModLibraryService(store, user);
+
+    Console.WriteLine($"== als {name} ({uid}) ==");
+
+    if (adopt)
+    {
+        var n = roots.AdoptLocalRoots();
+        Console.WriteLine($"auto-adopt: {n} Bibliothek(en) uebernommen (Pfad existiert auf diesem PC)");
+        Console.WriteLine();
+    }
+
+    // Dry-run of the bulk mapping the settings window offers, so the resolver can be
+    // checked against the real root list before anyone clicks anything.
+    if (mapUnder is not null)
+    {
+        Console.WriteLine($"Sammel-Zuordnung unter: {mapUnder}");
+        foreach (var prop in roots.ProposeMappingsUnder(mapUnder))
+        {
+            var mark = prop.ResolvedPath is null ? "NICHT GEFUNDEN" : prop.ResolvedPath;
+            var note = prop.AlreadyMapped ? "  (war schon zugeordnet)" : "";
+            Console.WriteLine($"  #{prop.RootId} {prop.DisplayName,-26} {mark}{note}");
+            Console.WriteLine($"        Referenz: {prop.ReferencePath}");
+        }
+
+        var (toApply, dupes) = RootService.SplitConflicts(roots.ProposeMappingsUnder(mapUnder));
+        foreach (var d in dupes)
+            Console.WriteLine($"  KONFLIKT: #{d.RootId} {d.DisplayName} zeigt auf denselben Ordner - uebersprungen");
+
+        if (applyMapping)
+        {
+            var applied = roots.ApplyMappings(toApply);
+            Console.WriteLine($"  -> {applied} Zuordnung(en) geschrieben");
+        }
+        else
+        {
+            Console.WriteLine("  (Probelauf - mit --apply wird geschrieben)");
+        }
+        Console.WriteLine();
+    }
+
+    Console.WriteLine("alle Bibliotheken aus Sicht dieses Benutzers:");
+    foreach (var r in roots.GetAll())
+        Console.WriteLine($"  #{r.Id} {r.DisplayName,-26} {r.StatusText,-18} {r.Path ?? "-"}");
+
+    Console.WriteLine();
+    Console.WriteLine("was die App im Root-Auswahlfeld zeigt (nur zugeordnete):");
+    var visible = library.GetRoots();
+    if (visible.Count == 0) Console.WriteLine("  (keine)");
+
+    var failures = 0;
+    foreach (var r in visible)
+    {
+        Console.WriteLine($"  #{r.Id} {r.DisplayName,-26} {r.Path}   enabled={r.Enabled}");
+
+        // Exercise the gallery query with this user's resolved path, and confirm the
+        // absolute paths it builds actually point at this machine.
+        try
+        {
+            var mods = library.GetMods(r.Id);
+            var sample = mods.FirstOrDefault();
+            var onDisk = sample is null ? 0 : mods.Count(m => Directory.Exists(m.FolderAbsPath));
+            Console.WriteLine($"        GetMods: {mods.Count} Mods, davon {onDisk} auf der Platte gefunden");
+            if (sample is not null)
+                Console.WriteLine($"        Beispielpfad: {sample.FolderAbsPath}");
+            if (mods.Count > 0 && onDisk == 0)
+            {
+                Console.WriteLine("        <-- KEIN Mod gefunden: Pfadaufloesung stimmt nicht");
+                failures++;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"        GetMods FAILED: {ex.Message}");
+            failures++;
+        }
+    }
+
+    // The regression that started all this: scanning a root another user created used to
+    // die with "Root path 'E:\...' does not exist" on a PC that has no E: drive.
+    Console.WriteLine();
+    Console.WriteLine("Scan-Verhalten bei NICHT zugeordneter Bibliothek:");
+    var unmapped = roots.GetAll().FirstOrDefault(r => !r.IsMapped);
+    if (unmapped is null)
+    {
+        Console.WriteLine("  (dieser Benutzer hat alles zugeordnet)");
+    }
+    else
+    {
+        var scanner = new ModScanner(store, null, user);
+        try
+        {
+            scanner.Scan(unmapped.Id);
+            Console.WriteLine($"  #{unmapped.Id}: unerwartet durchgelaufen  <-- FALSCH");
+            failures++;
+        }
+        catch (RootNotMappedException ex)
+        {
+            Console.WriteLine($"  #{unmapped.Id} {unmapped.DisplayName}: RootNotMappedException  OK");
+            Console.WriteLine("     " + FirstLine(ex.Message));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  #{unmapped.Id}: {ex.GetType().Name} statt RootNotMappedException  <-- FALSCH");
+            Console.WriteLine("     " + FirstLine(ex.Message));
+            failures++;
+        }
+    }
+
+    return failures == 0 ? 0 : 1;
+}
+
+static string FirstLine(string s) => s.Split('\n')[0].Trim();
+
+/// <summary>Stand-in for a signed-in user, so the CLI can test per-user resolution.</summary>
+sealed class FakeUser : ModOrganizer.Core.Auth.IUserContext
+{
+    public FakeUser(Guid id, string? name) { UserId = id; DisplayName = name; }
+    public Guid? UserId { get; }
+    public string? Email => null;
+    public string? DisplayName { get; }
+    public bool IsAuthenticated => true;
+#pragma warning disable CS0067
+    public event EventHandler? UserChanged;
+#pragma warning restore CS0067
 }

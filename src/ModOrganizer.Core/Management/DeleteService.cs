@@ -1,6 +1,7 @@
 using Dapper;
 using ModOrganizer.Core.Archive;
 using ModOrganizer.Core.Models;
+using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
 
 namespace ModOrganizer.Core.Management;
@@ -10,12 +11,15 @@ public sealed class DeleteService
     private readonly DatabaseStore _store;
     private readonly ArchiveService _archive;
     private readonly FileSystemActivityGate? _gate;
+    private readonly IUserContext? _user;
 
-    public DeleteService(DatabaseStore store, ArchiveService archive, FileSystemActivityGate? gate = null)
+    public DeleteService(DatabaseStore store, ArchiveService archive,
+        FileSystemActivityGate? gate = null, IUserContext? user = null)
     {
         _store = store;
         _archive = archive;
         _gate = gate;
+        _user = user;
     }
 
     public bool DeleteMod(long modId, bool archiveBeforeDelete = false)
@@ -24,11 +28,11 @@ public sealed class DeleteService
         using var conn = _store.Open();
         var row = conn.QuerySingle<(string FolderName, string CatName, string RootPath)>(
             """
-            SELECT m.folder_name AS FolderName, c.name AS CatName, r.path AS RootPath
+            SELECT m.folder_name AS FolderName, c.name AS CatName,
+                   mo_root_path(c.root_id, @uid) AS RootPath
             FROM mods m JOIN categories c ON c.id=m.category_id
-                        JOIN roots r ON r.id=c.root_id
             WHERE m.id=@m
-            """, new { m = modId });
+            """, new { m = modId, uid = _user?.UserId });
 
         var folderPath = Path.Combine(row.RootPath, row.CatName, row.FolderName);
 
@@ -61,9 +65,9 @@ public sealed class DeleteService
         using var conn = _store.Open();
         var row = conn.QuerySingle<(string Name, string RootPath)>(
             """
-            SELECT c.name AS Name, r.path AS RootPath
-            FROM categories c JOIN roots r ON r.id=c.root_id WHERE c.id=@id
-            """, new { id = categoryId });
+            SELECT c.name AS Name, mo_root_path(c.root_id, @uid) AS RootPath
+            FROM categories c WHERE c.id=@id
+            """, new { id = categoryId, uid = _user?.UserId });
 
         var folderPath = Path.Combine(row.RootPath, row.Name);
         bool recycled = true;

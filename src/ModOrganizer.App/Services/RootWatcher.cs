@@ -55,8 +55,10 @@ public sealed class RootWatcher : IDisposable
         Stop();
         foreach (var root in _library.GetRoots())
         {
+            // GetRoots already limits this to roots the current user mapped, but the
+            // folder can still be missing (drive not mounted, sync paused).
             if (!root.Enabled) continue;
-            if (!Directory.Exists(root.Path)) continue;
+            if (string.IsNullOrWhiteSpace(root.Path) || !Directory.Exists(root.Path)) continue;
             try
             {
                 var w = new FileSystemWatcher(root.Path)

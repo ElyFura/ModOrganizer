@@ -105,6 +105,7 @@ public partial class App : Application
 
                 services.AddSingleton<ModLibraryService>();
                 services.AddSingleton<ModDetailQuery>();
+                services.AddSingleton<RootService>();
 
                 // Shared by every service that writes into a mod root, so the filesystem
                 // watcher can ignore changes the app made itself.
@@ -141,6 +142,7 @@ public partial class App : Application
                 services.AddSingleton<ThumbnailCache>();
                 services.AddSingleton<ModDetailViewModelFactory>();
                 services.AddTransient<CategoryManagerViewModel>();
+                services.AddTransient<RootSettingsViewModel>();
 
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();
@@ -199,6 +201,17 @@ public partial class App : Application
                 if (Directory.Exists(defaultPath))
                     library.EnsureRoot(defaultPath, "Dawntrail");
             }
+
+            // Carry this user over to per-user root paths: any root whose original path
+            // exists on this machine is almost certainly theirs. Roots belonging to the
+            // other user simply stay unmapped instead of being handed over as broken
+            // absolute paths.
+            try
+            {
+                var adopted = _host.Services.GetRequiredService<RootService>().AdoptLocalRoots();
+                if (adopted > 0) Log.Information("Adopted {Count} root path(s) for this user", adopted);
+            }
+            catch (Exception ex) { Log.Warning(ex, "Root adoption failed"); }
 
             mainVm = _host.Services.GetRequiredService<MainViewModel>();
             mainVm.Toasts = _host.Services.GetRequiredService<ToastHost>();

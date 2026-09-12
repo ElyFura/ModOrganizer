@@ -1,4 +1,5 @@
 using Dapper;
+using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
 
 namespace ModOrganizer.Core.Import;
@@ -13,11 +14,14 @@ public sealed class ImportService
 {
     private readonly DatabaseStore _store;
     private readonly Management.FileSystemActivityGate? _gate;
+    private readonly IUserContext? _user;
 
-    public ImportService(DatabaseStore store, Management.FileSystemActivityGate? gate = null)
+    public ImportService(DatabaseStore store, Management.FileSystemActivityGate? gate = null,
+        IUserContext? user = null)
     {
         _store = store;
         _gate = gate;
+        _user = user;
     }
 
     private static readonly (string Keyword, string Category)[] CategoryHints =
@@ -94,9 +98,9 @@ public sealed class ImportService
         using var conn = _store.Open();
         var row = conn.QuerySingle<(string RootPath, string CatName)>(
             """
-            SELECT r.path AS RootPath, c.name AS CatName
-            FROM categories c JOIN roots r ON r.id=c.root_id WHERE c.id=@id
-            """, new { id = categoryId });
+            SELECT mo_root_path(c.root_id, @uid) AS RootPath, c.name AS CatName
+            FROM categories c WHERE c.id=@id
+            """, new { id = categoryId, uid = _user?.UserId });
 
         var destFolder = Path.Combine(row.RootPath, row.CatName, folderName);
         Directory.CreateDirectory(destFolder);

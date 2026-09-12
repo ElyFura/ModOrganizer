@@ -85,7 +85,6 @@ public sealed class UndoService
                         """
                         SELECT c.id FROM categories c
                         JOIN mods m ON m.id=@m
-                        JOIN roots r ON r.id=c.root_id
                         WHERE c.root_id=(SELECT root_id FROM categories WHERE id=m.category_id)
                           AND LOWER(c.name)=LOWER(@n)
                         """, new { m = e.ModId.Value, n = fromCategory }, tx);

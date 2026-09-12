@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Dapper;
+using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
 
 namespace ModOrganizer.Core.Duplicates;
@@ -40,7 +41,13 @@ public sealed class DuplicateFinder
             RegexOptions.IgnoreCase);
 
     private readonly DatabaseStore _store;
-    public DuplicateFinder(DatabaseStore store) => _store = store;
+    private readonly IUserContext? _user;
+
+    public DuplicateFinder(DatabaseStore store, IUserContext? user = null)
+    {
+        _store = store;
+        _user = user;
+    }
 
     public IReadOnlyList<DuplicateGroup> FindAll(long? rootId = null)
     {
@@ -58,12 +65,11 @@ public sealed class DuplicateFinder
         """
         SELECT m.id AS ModId, c.root_id AS RootId, m.category_id AS CategoryId,
                m.folder_name AS FolderName, c.name AS CategoryName,
-               r.path AS RootPath, m.rating AS Rating, m.folder_mtime AS FolderMtime,
+               mo_root_path(c.root_id, @uid) AS RootPath, m.rating AS Rating, m.folder_mtime AS FolderMtime,
                COALESCE(f.total, 0) AS TotalSizeBytes,
                COALESCE(f.cnt, 0) AS FileCount
         FROM mods m
         JOIN categories c ON c.id = m.category_id
-        JOIN roots r ON r.id = c.root_id
         LEFT JOIN (
             SELECT mod_id, SUM(size_bytes) AS total, COUNT(*) AS cnt
             FROM mod_files GROUP BY mod_id
@@ -75,7 +81,8 @@ public sealed class DuplicateFinder
     private List<DuplicateModRow> LoadCandidates(long? rootId)
     {
         using var conn = _store.Open();
-        var rows = conn.Query<DuplicateModRow>(CandidateSql, new { r = rootId }).ToList();
+        var rows = conn.Query<DuplicateModRow>(CandidateSql,
+            new { r = rootId, uid = _user?.UserId }).ToList();
 
         foreach (var row in rows)
             row.FolderAbsPath = Path.Combine(row.RootPath, row.CategoryName, row.FolderName);

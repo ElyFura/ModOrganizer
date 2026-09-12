@@ -1,4 +1,5 @@
 using Dapper;
+using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Links;
 using ModOrganizer.Core.Pmp;
 using ModOrganizer.Core.Storage;
@@ -36,16 +37,20 @@ public sealed record ModDetailFile(string RelativePath, int Kind, long SizeBytes
 public sealed class ModDetailQuery
 {
     private readonly DatabaseStore _store;
+    private readonly IUserContext? _user;
 
-    public ModDetailQuery(DatabaseStore store) => _store = store;
+    public ModDetailQuery(DatabaseStore store, IUserContext? user = null)
+    {
+        _store = store;
+        _user = user;
+    }
 
     private const string Sql = """
         SELECT m.folder_name AS FolderName, m.display_name AS DisplayName,
-               c.name AS CategoryName, r.path AS RootPath, m.rating AS Rating,
+               c.name AS CategoryName, mo_root_path(c.root_id, @uid) AS RootPath, m.rating AS Rating,
                COALESCE(m.comment_md, '') AS CommentMarkdown
         FROM mods m
         JOIN categories c ON c.id = m.category_id
-        JOIN roots r ON r.id = c.root_id
         WHERE m.id = @m;
 
         SELECT relative_path AS RelativePath, kind AS Kind, size_bytes AS SizeBytes
@@ -95,7 +100,8 @@ public sealed class ModDetailQuery
     {
         await using var conn = await _store.OpenAsync(ct).ConfigureAwait(false);
         await using var multi = await conn.QueryMultipleAsync(
-            new CommandDefinition(Sql, new { m = modId }, cancellationToken: ct)).ConfigureAwait(false);
+            new CommandDefinition(Sql, new { m = modId, uid = _user?.UserId }, cancellationToken: ct))
+            .ConfigureAwait(false);
 
         var header = (await multi.ReadAsync<HeaderRow>().ConfigureAwait(false)).SingleOrDefault();
         if (header is null) return null;

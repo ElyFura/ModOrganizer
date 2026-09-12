@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Dapper;
 using ModOrganizer.Core.Models;
+using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
 
 namespace ModOrganizer.Core.Management;
@@ -37,11 +38,14 @@ public sealed class RenameService
 
     private readonly DatabaseStore _store;
     private readonly FileSystemActivityGate? _gate;
+    private readonly IUserContext? _user;
 
-    public RenameService(DatabaseStore store, FileSystemActivityGate? gate = null)
+    public RenameService(DatabaseStore store, FileSystemActivityGate? gate = null,
+        IUserContext? user = null)
     {
         _store = store;
         _gate = gate;
+        _user = user;
     }
 
     public RenamePlan CreatePlan(long modId, string newFolderName)
@@ -54,11 +58,11 @@ public sealed class RenameService
         using var conn = _store.Open();
         var row = conn.QuerySingle<(string RootPath, string CatName, string OldFolder)>(
             """
-            SELECT r.path AS RootPath, c.name AS CatName, m.folder_name AS OldFolder
+            SELECT mo_root_path(c.root_id, @uid) AS RootPath, c.name AS CatName,
+                   m.folder_name AS OldFolder
             FROM mods m JOIN categories c ON c.id=m.category_id
-                        JOIN roots r ON r.id=c.root_id
             WHERE m.id=@m
-            """, new { m = modId });
+            """, new { m = modId, uid = _user?.UserId });
 
         var oldFolderPath = Path.Combine(row.RootPath, row.CatName, row.OldFolder);
         var newFolderPath = Path.Combine(row.RootPath, row.CatName, newFolderName);
@@ -275,11 +279,11 @@ public sealed class RenameService
             index++;
             var row = conn.QuerySingleOrDefault<(string RootPath, string CatName, string Folder)>(
                 """
-                SELECT r.path AS RootPath, c.name AS CatName, m.folder_name AS Folder
+                SELECT mo_root_path(c.root_id, @uid) AS RootPath, c.name AS CatName,
+                       m.folder_name AS Folder
                 FROM mods m JOIN categories c ON c.id=m.category_id
-                            JOIN roots r ON r.id=c.root_id
                 WHERE m.id=@m
-                """, new { m = modId });
+                """, new { m = modId, uid = _user?.UserId });
             if (string.IsNullOrEmpty(row.Folder)) continue;
 
             string newName;

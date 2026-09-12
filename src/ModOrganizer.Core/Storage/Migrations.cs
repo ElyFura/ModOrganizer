@@ -346,6 +346,59 @@ internal static class Migrations
         CREATE INDEX IF NOT EXISTS idx_mods_live_category
             ON mods(category_id) WHERE deleted_at IS NULL;
         """),
+
+        // v8: per-user root paths.
+        //
+        // A root used to be one absolute path shared by everyone, so a second user on a
+        // different PC saw the first user's drive letters and every scan died with
+        // "Root path 'E:\...' does not exist". The folder itself is the same (synced via
+        // Nextcloud) — only where it is mounted differs.
+        //
+        // So a root is now the *logical* library ("Dawntrail"), and each user maps it to
+        // their own local folder. Categories, mods, tags and comments keep hanging off the
+        // logical root, which is what makes the library shared in the first place.
+        //
+        // roots.path stays as the creator's original path: it is the fallback for
+        // single-user/offline use and the hint used to auto-adopt a mapping on the machine
+        // it was created on.
+        (8, """
+        CREATE TABLE IF NOT EXISTS root_paths (
+            root_id   BIGINT NOT NULL REFERENCES roots(id) ON DELETE CASCADE,
+            user_id   UUID   NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            path      TEXT   NOT NULL,
+            enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+            added_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (root_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_root_paths_user ON root_paths(user_id);
+
+        -- Resolves a root to the folder THIS user has it mounted at.
+        -- NULL means "this user has not mapped that root" — callers must then skip it
+        -- rather than fall back to someone else's drive letter, which is the whole bug.
+        -- A NULL user (offline / CLI) falls back to the root's original path.
+        CREATE OR REPLACE FUNCTION mo_root_path(p_root BIGINT, p_user UUID)
+        RETURNS TEXT
+        LANGUAGE sql
+        STABLE
+        AS $$
+            SELECT CASE
+                WHEN p_user IS NULL THEN (SELECT path FROM roots WHERE id = p_root)
+                ELSE (SELECT path FROM root_paths WHERE root_id = p_root AND user_id = p_user)
+            END
+        $$;
+
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+                BEGIN
+                    ALTER PUBLICATION supabase_realtime ADD TABLE public.root_paths;
+                EXCEPTION
+                    WHEN duplicate_object THEN NULL;
+                    WHEN insufficient_privilege THEN NULL;
+                END;
+            END IF;
+        END $$;
+        """),
     };
 
     public static int CurrentVersion(NpgsqlConnection conn)

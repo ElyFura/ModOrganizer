@@ -1,9 +1,14 @@
 <Window x:Class="ModOrganizer.App.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Settings" Height="480" Width="720"
+        xmlns:vm="clr-namespace:ModOrganizer.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Einstellungen" Height="680" Width="1150"
         Background="{DynamicResource Bg0}" Foreground="{DynamicResource Text}"
         FontFamily="Segoe UI Variable, Segoe UI" FontSize="13"
+        d:DataContext="{d:DesignInstance Type=vm:RootSettingsViewModel}"
         TextOptions.TextFormattingMode="Ideal" TextOptions.TextRenderingMode="ClearType">
     <Grid>
         <Grid.RowDefinitions>
@@ -15,30 +20,100 @@
         <Border Grid.Row="0" Background="{StaticResource Bg1}" Padding="24,18"
                 BorderBrush="{StaticResource Border1}" BorderThickness="0,0,0,1">
             <StackPanel>
-                <TextBlock Text="Settings" Style="{StaticResource H1}" />
-                <TextBlock Text="Mod roots that the scanner will index" Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                <TextBlock Text="Mod-Bibliotheken" Style="{StaticResource H1}" />
+                <TextBlock Style="{StaticResource Caption}" Margin="0,3,0,0" TextWrapping="Wrap"
+                           Text="Eine Bibliothek ist für alle Benutzer dieselbe — jeder ordnet ihr aber den Ordner auf seinem eigenen PC zu. So funktioniert derselbe über Nextcloud synchronisierte Mod-Ordner auf mehreren Rechnern mit unterschiedlichen Laufwerksbuchstaben." />
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="1" Padding="24,18" Background="{StaticResource Bg0}">
-            <DockPanel LastChildFill="True">
-                <TextBlock DockPanel.Dock="Top" Text="MOD ROOTS" Style="{StaticResource Label}" />
-                <DataGrid x:Name="Grid" AutoGenerateColumns="False" IsReadOnly="True">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="Name" Binding="{Binding DisplayName}" Width="200" />
-                        <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="*" />
-                        <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="80" />
-                    </DataGrid.Columns>
-                </DataGrid>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="320" />
+            </Grid.ColumnDefinitions>
+
+            <DataGrid Grid.Column="0" ItemsSource="{Binding Roots}" SelectedItem="{Binding Selected}"
+                      AutoGenerateColumns="False" HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal" SelectionMode="Single"
+                      Background="Transparent" BorderThickness="0"
+                      RowBackground="Transparent" AlternatingRowBackground="#0AFFFFFF"
+                      HorizontalGridLinesBrush="{StaticResource Border1}"
+                      Foreground="{StaticResource Text}" Margin="16,12,8,12"
+                      CanUserAddRows="False">
+                <DataGrid.Columns>
+                    <DataGridCheckBoxColumn Header="Aktiv" Binding="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}"
+                                            Width="55" />
+                    <DataGridTextColumn Header="Bibliothek" Binding="{Binding DisplayName}" Width="160"
+                                        IsReadOnly="True" />
+                    <DataGridTextColumn Header="Status" Binding="{Binding StatusText}" Width="110"
+                                        IsReadOnly="True" />
+                    <DataGridTextColumn Header="Mein Ordner auf diesem PC" Binding="{Binding PathText}"
+                                        Width="*" MinWidth="260" IsReadOnly="True" />
+                    <DataGridTextColumn Header="Inhalt" Binding="{Binding CountsText}" Width="130"
+                                        IsReadOnly="True" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <Border Grid.Column="1" Width="1" Background="{StaticResource Border1}" />
+
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="20,16,20,20">
+                    <TextBlock Text="{Binding Selected.DisplayName, FallbackValue='Keine Auswahl'}"
+                               Style="{StaticResource H2}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Selected.SharedText}" Style="{StaticResource Caption}"
+                               Margin="0,2,0,0" />
+                    <TextBlock Text="{Binding Selected.CountsText}" Style="{StaticResource Caption}" />
+
+                    <StackPanel IsEnabled="{Binding Selected, Converter={StaticResource NotNullToBool}}">
+                        <TextBlock Text="ZUORDNUNG" Style="{StaticResource Label}" Margin="0,22,0,6" />
+                        <Button Content="Ordner auf diesem PC wählen…" Command="{Binding MapFolderCommand}"
+                                Style="{StaticResource PrimaryButton}" Padding="12,7" />
+                        <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Text="Zeigt auf den lokalen Ordner. Bei jedem Benutzer darf das ein anderer Pfad sein." />
+
+                        <Button Content="Jetzt scannen" Command="{Binding ScanSelectedCommand}"
+                                Padding="12,7" Margin="0,12,0,0" />
+                        <Button Content="Umbenennen…" Command="{Binding RenameRootCommand}"
+                                Padding="12,7" Margin="0,8,0,0" />
+
+                        <Separator Margin="0,20,0,14" Background="{StaticResource Border1}" />
+
+                        <Button Content="Zuordnung entfernen" Command="{Binding RemoveMappingCommand}"
+                                Padding="12,7" />
+                        <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Text="Blendet die Bibliothek nur bei dir aus. Andere Benutzer behalten sie." />
+
+                        <Button Content="Bibliothek löschen" Command="{Binding DeleteRootCommand}"
+                                Padding="12,7" Margin="0,12,0,0"
+                                Background="#B3382F" Foreground="White" BorderThickness="0" />
+                        <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Text="Entfernt sie für ALLE Benutzer aus der Datenbank. Auf der Festplatte wird nichts gelöscht." />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <Border Grid.Row="2" Background="{StaticResource Bg1}" Padding="24,12"
+                BorderBrush="{StaticResource Border1}" BorderThickness="0,1,0,0">
+            <DockPanel LastChildFill="False">
+                <TextBlock DockPanel.Dock="Left" Text="{Binding StatusText}"
+                           Style="{StaticResource Caption}" VerticalAlignment="Center" />
+                <Button DockPanel.Dock="Right" Content="Schließen" Click="Close_Click" Padding="16,6" />
+                <Button DockPanel.Dock="Right" Content="Bibliothek hinzufügen…"
+                        Command="{Binding AddRootCommand}"
+                        Padding="14,6" Margin="0,0,8,0" />
+                <Button DockPanel.Dock="Right" Content="Alle auf einmal zuordnen…"
+                        Command="{Binding MapAllUnderBaseCommand}"
+                        Style="{StaticResource PrimaryButton}" Padding="14,6" Margin="0,0,8,0"
+                        ToolTip="Einen Basisordner wählen (z. B. den Nextcloud-Ordner) — alle Bibliotheken darunter werden automatisch zugeordnet" />
             </DockPanel>
         </Border>
 
-        <Border Grid.Row="2" Background="{StaticResource Bg1}" Padding="24,14"
-                BorderBrush="{StaticResource Border1}" BorderThickness="0,1,0,0">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Add root…" Click="AddRoot_Click" Style="{StaticResource PrimaryButton}" Margin="0,0,8,0" />
-                <Button Content="Close" Click="Close_Click" />
-            </StackPanel>
-        </Border>
+        <Grid Grid.RowSpan="3" Background="#AA000000"
+              Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisible}}">
+            <TextBlock Text="Arbeite…" Foreground="White" FontSize="16"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Grid>
     </Grid>
 </Window>

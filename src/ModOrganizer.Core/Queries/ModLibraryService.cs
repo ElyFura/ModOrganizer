@@ -1,4 +1,5 @@
 using Dapper;
+using ModOrganizer.Core.Auth;
 using ModOrganizer.Core.Storage;
 
 namespace ModOrganizer.Core.Queries;
@@ -91,22 +92,45 @@ public sealed record ModQuery
 public sealed class ModLibraryService
 {
     private readonly DatabaseStore _store;
+    private readonly IUserContext? _user;
 
-    public ModLibraryService(DatabaseStore store) => _store = store;
+    public ModLibraryService(DatabaseStore store, IUserContext? user = null)
+    {
+        _store = store;
+        _user = user;
+    }
 
+    /// <summary>Current user, or null when running offline / from the CLI.</summary>
+    private Guid? UserId => _user?.UserId;
+
+    /// <summary>
+    /// Only the roots this user has mapped to a folder of their own. A root nobody mapped
+    /// on this machine is deliberately invisible: before, every user saw every other
+    /// user's absolute paths and scanning them failed with "does not exist".
+    /// </summary>
     private const string RootsSql =
-        "SELECT id AS Id, path AS Path, display_name AS DisplayName, enabled AS Enabled FROM roots ORDER BY added_at";
+        """
+        SELECT r.id AS Id,
+               mo_root_path(r.id, @uid) AS Path,
+               r.display_name AS DisplayName,
+               COALESCE(rp.enabled, r.enabled) AS Enabled
+        FROM roots r
+        LEFT JOIN root_paths rp ON rp.root_id = r.id AND rp.user_id = @uid
+        WHERE mo_root_path(r.id, @uid) IS NOT NULL
+        ORDER BY r.added_at, r.id
+        """;
 
     public IReadOnlyList<RootInfo> GetRoots()
     {
         using var conn = _store.Open();
-        return conn.Query<RootInfo>(RootsSql).ToList();
+        return conn.Query<RootInfo>(RootsSql, new { uid = UserId }).ToList();
     }
 
     public async Task<IReadOnlyList<RootInfo>> GetRootsAsync(CancellationToken ct = default)
     {
         await using var conn = await _store.OpenAsync(ct).ConfigureAwait(false);
-        var rows = await conn.QueryAsync<RootInfo>(new CommandDefinition(RootsSql, cancellationToken: ct))
+        var rows = await conn.QueryAsync<RootInfo>(
+            new CommandDefinition(RootsSql, new { uid = UserId }, cancellationToken: ct))
             .ConfigureAwait(false);
         return rows.ToList();
     }
@@ -301,7 +325,8 @@ public sealed class ModLibraryService
     public IReadOnlyList<ModCard> GetMods(ModQuery query)
     {
         using var conn = _store.Open();
-        var rootPath = conn.QuerySingle<string>("SELECT path FROM roots WHERE id=@r", new { r = query.RootId });
+        var rootPath = conn.QuerySingleOrDefault<string>(
+            "SELECT mo_root_path(@r, @uid)", new { r = query.RootId, uid = UserId }) ?? "";
 
         using var multi = conn.QueryMultiple(ModsSql(query.Sort), ModsParams(query));
         var rows = multi.Read<ModCardRow>().ToList();
@@ -315,8 +340,8 @@ public sealed class ModLibraryService
         await using var conn = await _store.OpenAsync(ct).ConfigureAwait(false);
 
         var rootPath = await conn.QuerySingleAsync<string>(new CommandDefinition(
-            "SELECT path FROM roots WHERE id=@r", new { r = query.RootId }, cancellationToken: ct))
-            .ConfigureAwait(false);
+            "SELECT mo_root_path(@r, @uid)", new { r = query.RootId, uid = UserId },
+            cancellationToken: ct)).ConfigureAwait(false) ?? "";
 
         await using var multi = await conn.QueryMultipleAsync(new CommandDefinition(
             ModsSql(query.Sort), ModsParams(query), cancellationToken: ct)).ConfigureAwait(false);
@@ -382,16 +407,15 @@ public sealed class ModLibraryService
                                string CreatedAt, string UpdatedAt, string? DeletedAt, long Size)>(
             """
             SELECT m.id AS Id, m.category_id AS CategoryId, c.name AS CategoryName,
-                   c.root_id AS RootId, r.path AS RootPath,
+                   c.root_id AS RootId, mo_root_path(c.root_id, @uid) AS RootPath,
                    m.folder_name AS FolderName, m.display_name AS DisplayName, m.rating AS Rating,
                    m.created_at AS CreatedAt, m.updated_at AS UpdatedAt, m.deleted_at AS DeletedAt,
                    (SELECT COALESCE(SUM(size_bytes),0) FROM mod_files WHERE mod_id=m.id) AS Size
             FROM mods m
             JOIN categories c ON c.id=m.category_id
-            JOIN roots r ON r.id=c.root_id
             WHERE m.deleted_at IS NOT NULL
             ORDER BY m.deleted_at DESC
-            """).ToList();
+            """, new { uid = UserId }).ToList();
 
         var result = new List<ModCard>(rows.Count);
         foreach (var row in rows)

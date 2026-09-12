@@ -678,11 +678,26 @@ public sealed partial class MainViewModel : ObservableObject
             StatusText = "Scan abgebrochen.";
             await LoadAsync().ConfigureAwait(true);
         }
+        catch (RootNotMappedException ex)
+        {
+            // Expected for a user who has not pointed this library at a local folder yet.
+            StatusText = "Bibliothek nicht zugeordnet.";
+            MessageBox.Show(ex.Message, "Nicht zugeordnet",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            // The mapping exists but the folder is gone (drive not mounted, sync paused).
+            StatusText = "Ordner nicht gefunden.";
+            MessageBox.Show(ex.Message, "Ordner nicht gefunden",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
         catch (Exception ex)
         {
             _log.LogError(ex, "Rescan failed");
             StatusText = "Scan fehlgeschlagen: " + ex.Message;
-            MessageBox.Show(ex.ToString(), "Scan failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(ex.Message, "Scan fehlgeschlagen",
+                MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -818,10 +833,8 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenSettings()
     {
-        var window = new SettingsWindow(_library, _scanner)
-        {
-            Owner = Application.Current.MainWindow
-        };
+        var vm = _sp.GetRequiredService<RootSettingsViewModel>();
+        var window = new SettingsWindow(vm) { Owner = Application.Current.MainWindow };
         window.ShowDialog();
         if (window.RootsChanged) Load();
     }
