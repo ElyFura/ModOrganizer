@@ -144,7 +144,8 @@ public sealed class ModScanner
 
         // A library whose structure was just reinterpreted legitimately loses most of its
         // old rows, so the sync guard has to stand down for exactly this one scan.
-        var missing = MarkMissingMods(conn, tx, rootId, modIds.Values, ignoreSyncGuard: root.ScanModeDirty);
+        var missing = MarkMissingMods(conn, tx, rootId, root.Path!, modIds.Values,
+            ignoreSyncGuard: root.ScanModeDirty);
 
         // If the mod-level check refused to flag, the category-level one must not flag
         // either — otherwise a half-synced root loses its whole category list.
@@ -165,7 +166,7 @@ public sealed class ModScanner
         return new ScanSummary(
             disk.Count, modsSeen, filesSeen, hashesComputed,
             catsMissing, missing.Marked, sw.Elapsed,
-            missing.Vanished, missing.Skipped);
+            missing.Vanished, missing.Skipped, missing.Obsolete);
     }
 
     /// <summary>
@@ -789,7 +790,7 @@ public sealed class ModScanner
     // ---------------- missing bookkeeping ----------------
 
     /// <summary>What one scan decided about the mods it did not find on disk.</summary>
-    private readonly record struct MissingResult(int Marked, int Vanished, bool Skipped);
+    private readonly record struct MissingResult(int Marked, int Vanished, bool Skipped, int Obsolete);
 
     /// <summary>
     /// A scan that suddenly cannot find most of the library is far more likely to be a
@@ -801,19 +802,57 @@ public sealed class ModScanner
         liveInDb >= 20 && vanished > liveInDb / 2;
 
     private MissingResult MarkMissingMods(
-        NpgsqlConnection conn, NpgsqlTransaction tx, long rootId, IEnumerable<long> seenModIds,
-        bool ignoreSyncGuard = false)
+        NpgsqlConnection conn, NpgsqlTransaction tx, long rootId, string rootPath,
+        IEnumerable<long> seenModIds, bool ignoreSyncGuard = false)
     {
         var seen = seenModIds.Distinct().ToArray();
 
-        var counts = conn.QuerySingle<(int Live, int Vanished)>(
+        // Rows this scan did not produce, with enough to rebuild their path on disk.
+        var candidates = conn.Query<(long Id, string Category, string Folder, int Rating)>(
             """
-            SELECT COUNT(*)::int AS Live,
-                   COUNT(*) FILTER (WHERE NOT (id = ANY(@seen)))::int AS Vanished
-            FROM mods
-            WHERE deleted_at IS NULL
-              AND category_id IN (SELECT id FROM categories WHERE root_id=@r)
-            """, new { r = rootId, seen }, tx);
+            SELECT m.id AS Id, c.name AS Category, m.folder_name AS Folder, m.rating AS Rating
+            FROM mods m
+            JOIN categories c ON c.id = m.category_id
+            WHERE m.deleted_at IS NULL AND c.root_id = @r AND NOT (m.id = ANY(@seen))
+            """, new { r = rootId, seen }, tx).ToList();
+
+        // A folder that is still on disk is not missing - it simply stopped being a mod,
+        // which is what happens to a grouping folder when a library switches to the nested
+        // model. Calling that "gone from disk" sent people looking for files that are right
+        // where they always were.
+        var obsolete = new List<long>();
+        var reallyGone = new List<long>();
+
+        foreach (var c in candidates)
+        {
+            var path = Path.Combine(rootPath, c.Category, c.Folder);
+            if (Directory.Exists(path)) obsolete.Add(c.Id);
+            else reallyGone.Add(c.Id);
+        }
+
+        // Obsolete rows are dropped, but only when nothing of the user's own work hangs off
+        // them. Anything rated, tagged or commented is left for a human to look at.
+        var removed = 0;
+        if (obsolete.Count > 0)
+        {
+            removed = conn.Execute(
+                """
+                DELETE FROM mods m
+                WHERE m.id = ANY(@ids)
+                  AND m.rating = 0
+                  AND NOT EXISTS (SELECT 1 FROM mod_tags     t WHERE t.mod_id = m.id)
+                  AND NOT EXISTS (SELECT 1 FROM mod_comments k WHERE k.mod_id = m.id)
+                """, new { ids = obsolete.ToArray() }, tx);
+        }
+
+        var live = conn.ExecuteScalar<int>(
+            """
+            SELECT COUNT(*)::int FROM mods m
+            JOIN categories c ON c.id = m.category_id
+            WHERE m.deleted_at IS NULL AND c.root_id = @r
+            """, new { r = rootId }, tx);
+
+        var counts = (Live: live, Vanished: reallyGone.Count);
 
         if (!ignoreSyncGuard && LooksLikeIncompleteSync(counts.Live, counts.Vanished))
         {
@@ -821,21 +860,18 @@ public sealed class ModScanner
                 "Root {Root}: {Vanished} of {Live} mods not found on disk - not flagging, " +
                 "this looks like an incomplete sync rather than a deletion.",
                 rootId, counts.Vanished, counts.Live);
-            return new MissingResult(0, counts.Vanished, Skipped: true);
+            return new MissingResult(0, counts.Vanished, Skipped: true, Obsolete: removed);
         }
 
         // missing_since is set once and then left alone, so "gone for two weeks" stays
         // distinguishable from "gone since the last scan" across any number of scans.
-        var marked = conn.Execute(
+        var marked = reallyGone.Count == 0 ? 0 : conn.Execute(
             """
             UPDATE mods SET is_missing=TRUE, missing_since=NOW(), missing_by=@u
-            WHERE is_missing=FALSE
-              AND deleted_at IS NULL
-              AND category_id IN (SELECT id FROM categories WHERE root_id=@r)
-              AND NOT (id = ANY(@seen))
-            """, new { r = rootId, seen, u = _user?.UserId }, tx);
+            WHERE is_missing=FALSE AND deleted_at IS NULL AND id = ANY(@ids)
+            """, new { ids = reallyGone.ToArray(), u = _user?.UserId }, tx);
 
-        return new MissingResult(marked, counts.Vanished, Skipped: false);
+        return new MissingResult(marked, counts.Vanished, Skipped: false, Obsolete: removed);
     }
 
     private static int MarkMissingCategories(

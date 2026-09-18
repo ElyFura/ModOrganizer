@@ -36,6 +36,24 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // Before anything else: this instance may only exist to replace the old build.
+        // No config, no database, no window - just copy and restart.
+        if (e.Args.Length >= 3 && e.Args[0] == Services.UpdateService.FinishSwitch)
+        {
+            var error = Services.UpdateService.FinishUpdate(
+                e.Args[1], int.TryParse(e.Args[2], out var pid) ? pid : -1);
+
+            if (error is not null)
+                MessageBox.Show("Das Update konnte nicht abgeschlossen werden:\n\n" + error,
+                    "Update fehlgeschlagen", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+            Shutdown();
+            return;
+        }
+
+        // Leftovers from a previous update are of no use once we are running.
+        Services.UpdateService.CleanUp();
+
         // CRITICAL: stay alive between LoginWindow.Close and MainWindow.Show —
         // otherwise WPF sees "zero windows" for a tick and shuts the app down.
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -125,6 +143,7 @@ public partial class App : Application
                 services.AddSingleton<PenumbraService>();
                 services.AddSingleton<PenumbraSyncService>();
                 services.AddSingleton<PenumbraWatcher>();
+                services.AddSingleton<UpdateService>();
                 services.AddSingleton<MoveService>();
                 services.AddSingleton<ArchiveService>(_ => new ArchiveService());
                 services.AddSingleton<DeleteService>();
@@ -238,6 +257,17 @@ public partial class App : Application
         var penumbraWatcher = _host.Services.GetRequiredService<PenumbraWatcher>();
         penumbraWatcher.SnapshotPushed += (_, _) => Dispatcher.Invoke(() => _ = mainVm.ReloadPenumbraAsync());
         penumbraWatcher.Start();
+
+        // Look for a new release in the background. A failed check is a log line, never a
+        // dialog - the app works fine without ever updating.
+        var updates = _host.Services.GetRequiredService<UpdateService>();
+        mainVm.Updates = updates;
+        _ = Task.Run(async () =>
+        {
+            var found = await updates.CheckAsync().ConfigureAwait(false);
+            if (found is not null)
+                Dispatcher.Invoke(() => mainVm.SetAvailableUpdate(found));
+        });
 
         // Housekeeping, off the UI thread and deliberately after everything else is up:
         // the cache only needs trimming once per session and nothing waits on it.

@@ -13,6 +13,7 @@
             <conv:AddConverter x:Key="Add" />
             <conv:NotNullToBoolConverter x:Key="NotNullToBool" />
             <conv:NotNullToVisibleConverter x:Key="NotNullToVisible" />
+            <conv:InverseBoolConverter x:Key="InverseBool" />
             <conv:HexToBrushConverter x:Key="HexToBrush" />
             <conv:TagRefToBrushConverter x:Key="TagBrush" />
             <conv:IntGreaterEqualConverter x:Key="Ge2" />

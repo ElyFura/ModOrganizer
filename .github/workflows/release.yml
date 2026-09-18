@@ -1,0 +1,56 @@
+name: Release
+
+# Ein Tag wie v1.1.0 baut die exe und haengt sie an ein GitHub-Release.
+# Genau dort sucht die App nach Updates, deshalb muss der Tag zur <Version>
+# in ModOrganizer.App.csproj passen - der Schritt unten prueft das.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Version gegen Tag pruefen
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          $csproj = [xml](Get-Content src/ModOrganizer.App/ModOrganizer.App.csproj)
+          $version = ($csproj.Project.PropertyGroup.Version | Where-Object { $_ }) -join ''
+          if ($tag -ne $version) {
+            throw "Tag $tag passt nicht zu <Version>$version</Version>. Sonst haelt sich die neue exe fuer aktuell."
+          }
+          "Version $version bestaetigt" | Write-Host
+
+      - name: Tests
+        run: dotnet test src/ModOrganizer.Core.Tests/ModOrganizer.Core.Tests.csproj -c Release --nologo
+
+      - name: Veroeffentlichen
+        run: dotnet publish src/ModOrganizer.App/ModOrganizer.App.csproj -c Release -o publish --nologo
+
+      - name: Pruefsumme
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash publish/ModOrganizer.App.exe -Algorithm SHA256).Hash
+          "$hash  ModOrganizer.App.exe" | Out-File publish/ModOrganizer.App.exe.sha256 -Encoding ascii
+          Write-Host $hash
+
+      - name: Release anlegen
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            publish/ModOrganizer.App.exe
+            publish/ModOrganizer.App.exe.sha256
+          generate_release_notes: true

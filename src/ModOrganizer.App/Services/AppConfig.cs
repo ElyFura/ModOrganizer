@@ -9,6 +9,19 @@ public sealed class AppConfig
     public PostgresConfig Postgres { get; set; } = new();
     public UiConfig Ui { get; set; } = new();
     public AuthConfig Auth { get; set; } = new();
+    public UpdateConfig Update { get; set; } = new();
+
+    public sealed class UpdateConfig
+    {
+        /// <summary>Set to false to stop the app looking for new releases at all.</summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>"owner/name" on GitHub. Overridable so a fork can point elsewhere.</summary>
+        public string Repository { get; set; } = "ElyFura/ModOrganizer";
+
+        /// <summary>Off by default: a prerelease is published to be tested, not rolled out.</summary>
+        public bool IncludePrereleases { get; set; }
+    }
 
     public sealed class AuthConfig
     {

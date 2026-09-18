@@ -23,6 +23,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ModOrganizer.Core\ModOrganizer.Core.csproj" />
+
+    <!-- Auch die App, damit die Update-Logik getestet werden kann. Ein falscher
+         Versionsvergleich faellt sonst erst auf, wenn niemand mehr Updates bekommt. -->
+    <ProjectReference Include="..\ModOrganizer.App\ModOrganizer.App.csproj" />
   </ItemGroup>
+
 
 </Project>

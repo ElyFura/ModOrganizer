@@ -183,6 +183,7 @@ Console.WriteLine($"  Files           : {summary.FilesSeen}");
 Console.WriteLine($"  Hashes computed : {summary.HashesComputed}");
 Console.WriteLine($"  Missing cats    : {summary.CategoriesMarkedMissing}");
 Console.WriteLine($"  Missing mods    : {summary.ModsMarkedMissing}");
+Console.WriteLine($"  Obsolete removed: {summary.ObsoleteRemoved}   (Ordner da, aber kein Mod mehr)");
 
 return 0;
 

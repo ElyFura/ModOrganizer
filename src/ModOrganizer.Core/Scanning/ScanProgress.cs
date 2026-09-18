@@ -23,4 +23,10 @@ public sealed record ScanSummary(
     /// True when so much of the library was absent that flagging was refused — almost
     /// always a sync that has not finished, not a deletion.
     /// </summary>
-    bool MissingMarkSkipped = false);
+    bool MissingMarkSkipped = false,
+
+    /// <summary>
+    /// Rows dropped because their folder is still on disk but is no longer a mod - a
+    /// grouping folder after a library switched to the nested model.
+    /// </summary>
+    int ObsoleteRemoved = 0);
