@@ -1,5 +1,6 @@
 using FluentAssertions;
 using ModOrganizer.Core.Queries;
+using ModOrganizer.Core.Models;
 using ModOrganizer.Core.Scanning;
 
 namespace ModOrganizer.Core.Tests;
@@ -175,5 +176,99 @@ public sealed class ScanGateTests
         });
 
         winners.Should().Be(1);
+    }
+}
+
+/// <summary>
+/// Telling a mod folder from a grouping folder. This is what lets a pose library nest
+/// deeper (Solo/NSFW/Sitzend/pose) without the gear libraries changing shape.
+/// </summary>
+public sealed class NestedScanTests : IDisposable
+{
+    private readonly string _root;
+
+    public NestedScanTests()
+    {
+        _root = Path.Combine(Path.GetTempPath(), "mo-nest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_root);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_root, recursive: true); } catch { /* temp dir */ }
+    }
+
+    private string Dir(params string[] parts)
+    {
+        var p = Path.Combine(new[] { _root }.Concat(parts).ToArray());
+        Directory.CreateDirectory(p);
+        return p;
+    }
+
+    private void File_(string dir, string name) => File.WriteAllText(Path.Combine(dir, name), "x");
+
+    [Fact]
+    public void AFolderHoldingFilesIsAMod()
+    {
+        var mod = Dir("BDSM", "Guard Me");
+        File_(mod, "pose.pose");
+
+        ModScanner.LooksLikeMod(mod).Should().BeTrue();
+    }
+
+    [Fact]
+    public void AFolderWithSubFoldersAndAPreviewStaysOneMod()
+    {
+        // A mega pack: sub-folders plus its own preview image. Splitting it would scatter
+        // one download across dozens of entries.
+        var pack = Dir("Packs", "Mega Pack");
+        Dir("Packs", "Mega Pack", "Part 1");
+        Dir("Packs", "Mega Pack", "Part 2");
+        File_(pack, "preview.png");
+
+        ModScanner.LooksLikeMod(pack).Should().BeTrue();
+    }
+
+    [Fact]
+    public void AFolderWithOnlySubFoldersIsAGroup()
+    {
+        var group = Dir("Solo", "NSFW");
+        Dir("Solo", "NSFW", "Sitzend");
+
+        ModScanner.LooksLikeMod(group).Should().BeFalse();
+    }
+
+    [Fact]
+    public void AnEmptyFolderCountsAsAModSoItStaysVisible()
+    {
+        ModScanner.LooksLikeMod(Dir("Leer")).Should().BeTrue();
+    }
+}
+
+/// <summary>Pose files are the unit of a pose library, so they need their own kind.</summary>
+public sealed class FileClassifierPoseTests
+{
+    [Theory]
+    [InlineData("Standing.pose")]
+    [InlineData("QuickLunch(Sieann).POSE")]
+    [InlineData("sub/dir/Anastasia (f).pose")]
+    public void PoseFilesAreClassifiedAsPose(string name)
+    {
+        FileClassifier.Classify(name).Should().Be(ModFileKind.Pose);
+    }
+
+    [Fact]
+    public void PoseFilesAreNotHashed()
+    {
+        // Hashing exists to spot duplicate archives; a pose is a few kilobytes of JSON.
+        FileClassifier.ShouldHash(ModFileKind.Pose).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ArchivesKeepTheirKinds()
+    {
+        FileClassifier.Classify("mod.pmp").Should().Be(ModFileKind.Pmp);
+        FileClassifier.Classify("mod.ttmp2").Should().Be(ModFileKind.Ttmp2);
+        FileClassifier.Classify("preview.png").Should().Be(ModFileKind.Image);
     }
 }

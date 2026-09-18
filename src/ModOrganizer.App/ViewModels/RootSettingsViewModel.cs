@@ -42,6 +42,25 @@ public sealed partial class RootRowViewModel : ObservableObject
 
     public event EventHandler<bool>? EnabledChanged;
 
+    /// <summary>
+    /// On for libraries that nest deeper than category/mod - a pose library where the real
+    /// mods sit in Solo/NSFW/Sitzend. Off is right for the gear libraries, where turning it
+    /// on would tear modder folders apart.
+    /// </summary>
+    public bool NestedScan
+    {
+        get => Model.NestedScan;
+        set
+        {
+            if (Model.NestedScan == value) return;
+            Model.ScanMode = value ? "auto" : "fixed";
+            OnPropertyChanged();
+            NestedScanChanged?.Invoke(this, value);
+        }
+    }
+
+    public event EventHandler<bool>? NestedScanChanged;
+
     /// <summary>Shared libraries are the normal case once a second user maps them.</summary>
     public string SharedText => Model.MappedUserCount switch
     {
@@ -137,12 +156,17 @@ public sealed partial class RootSettingsViewModel : ObservableObject
 
             var rows = await _roots.GetAllAsync().ConfigureAwait(true);
 
-            foreach (var old in Roots) old.EnabledChanged -= OnRowEnabledChanged;
+            foreach (var old in Roots)
+            {
+                old.EnabledChanged -= OnRowEnabledChanged;
+                old.NestedScanChanged -= OnRowNestedScanChanged;
+            }
             Roots.Clear();
             foreach (var r in rows)
             {
                 var vm = new RootRowViewModel(r);
                 vm.EnabledChanged += OnRowEnabledChanged;
+                vm.NestedScanChanged += OnRowNestedScanChanged;
                 Roots.Add(vm);
             }
 
@@ -167,6 +191,27 @@ public sealed partial class RootSettingsViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    private async void OnRowNestedScanChanged(object? sender, bool nested)
+    {
+        if (sender is not RootRowViewModel row) return;
+
+        await RunAsync(() => _roots.SetScanMode(row.Id, nested), reload: false).ConfigureAwait(true);
+
+        var answer = MessageBox.Show(
+            nested
+                ? $"„{row.DisplayName}“ wird ab jetzt bis zu den Ordnern durchsucht, " +
+                  "die wirklich Dateien enthalten.\n\n" +
+                  "Die Struktur wird dabei neu aufgebaut: bisherige Einträge, die nur " +
+                  "Sammelordner waren, verschwinden aus der Galerie und landen in der " +
+                  "Übersicht der fehlenden Mods.\n\nJetzt neu scannen?"
+                : $"„{row.DisplayName}“ wird wieder als Bibliothek / Kategorie / Mod " +
+                  "gelesen.\n\nAuch das baut die Struktur neu auf.\n\nJetzt neu scannen?",
+            "Ordnerstruktur geändert", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+        if (answer == MessageBoxResult.Yes)
+            await ScanAsync(row.Id, row.DisplayName).ConfigureAwait(true);
     }
 
     private void OnRowEnabledChanged(object? sender, bool enabled)

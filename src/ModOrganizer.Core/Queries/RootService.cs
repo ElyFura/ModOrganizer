@@ -27,6 +27,14 @@ public sealed class RootMapping
     /// <summary>How many users have mapped this root; tells a shared root from a private one.</summary>
     public int MappedUserCount { get; set; }
 
+    /// <summary>
+    /// "fixed" = one level of categories, one level of mods. "auto" = walk down until the
+    /// folders actually hold files, for libraries that nest deeper (Solo/NSFW/Sitzend/...).
+    /// </summary>
+    public string ScanMode { get; set; } = "fixed";
+
+    public bool NestedScan => string.Equals(ScanMode, "auto", StringComparison.OrdinalIgnoreCase);
+
     public bool IsMapped => !string.IsNullOrWhiteSpace(Path);
 
     /// <summary>Mapped and actually present on this machine right now.</summary>
@@ -74,7 +82,8 @@ public sealed class RootService
                (SELECT COUNT(*) FROM mods m
                   JOIN categories c ON c.id = m.category_id
                  WHERE c.root_id = r.id AND m.deleted_at IS NULL) AS ModCount,
-               (SELECT COUNT(*) FROM root_paths x WHERE x.root_id = r.id) AS MappedUserCount
+               (SELECT COUNT(*) FROM root_paths x WHERE x.root_id = r.id) AS MappedUserCount,
+               r.scan_mode AS ScanMode
         FROM roots r
         LEFT JOIN root_paths rp ON rp.root_id = r.id AND rp.user_id = @uid
         ORDER BY r.added_at, r.id
@@ -260,6 +269,19 @@ public sealed class RootService
     /// What <see cref="ProposeMappingsUnder"/> worked out for one library.
     /// <paramref name="ResolvedPath"/> is null when nothing matching was found.
     /// </summary>
+    /// <summary>
+    /// Switches how this library is walked. The change is a property of the library, so it
+    /// applies to every user - and it marks the root dirty, so the next scan may rebuild
+    /// the structure without the "too much vanished" guard blocking it.
+    /// </summary>
+    public void SetScanMode(long rootId, bool nested)
+    {
+        using var conn = _store.Open();
+        conn.Execute(
+            "UPDATE roots SET scan_mode = @m, scan_mode_dirty = TRUE WHERE id = @r AND scan_mode <> @m",
+            new { m = nested ? "auto" : "fixed", r = rootId });
+    }
+
     public sealed record RootMapProposal(
         long RootId, string DisplayName, string ReferencePath, string? ResolvedPath, bool AlreadyMapped);
 

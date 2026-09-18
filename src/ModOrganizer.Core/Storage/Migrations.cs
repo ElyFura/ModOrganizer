@@ -418,6 +418,36 @@ internal static class Migrations
         CREATE INDEX IF NOT EXISTS idx_mods_missing
             ON mods(category_id, missing_since) WHERE is_missing = TRUE AND deleted_at IS NULL;
         """),
+
+        // v10: how deep a library nests its mods.
+        //
+        // The scanner assumed exactly root/category/mod. That fits the Dawntrail library,
+        // but the pose library nests further - Solo/NSFW/Sitzend/<pose> - and the fixed
+        // model turned "NSFW" into a single mod holding 574 images.
+        //
+        // Auto-detection cannot simply be turned on everywhere: Dawntrail has a stray
+        // .ttmp2 lying directly in a category folder and modder folders that hold nothing
+        // but sub-folders, so the same rule would tear a working library apart. Hence a
+        // per-library switch instead of a global change.
+        //
+        // scan_mode_dirty marks a library whose structure was just reinterpreted. The next
+        // scan then skips the "too much vanished at once" guard, which would otherwise
+        // mistake the deliberate rebuild for a half-finished sync.
+        (10, """
+        ALTER TABLE roots ADD COLUMN IF NOT EXISTS scan_mode       TEXT    NOT NULL DEFAULT 'fixed';
+        ALTER TABLE roots ADD COLUMN IF NOT EXISTS scan_mode_dirty BOOLEAN NOT NULL DEFAULT FALSE;
+        """),
+
+        // v11: .pose files get their own kind (5).
+        //
+        // They used to fall into "Other", so a pose pack showed no content at all on its
+        // card. The classification lives in code, but a scan only rewrites files whose size
+        // or timestamp changed - and these did not - so the existing rows have to be
+        // relabelled here. One statement, and it fixes every client at once.
+        (11, """
+        UPDATE mod_files SET kind = 5
+        WHERE kind <> 5 AND lower(relative_path) LIKE '%.pose';
+        """),
     };
 
     public static int CurrentVersion(NpgsqlConnection conn)

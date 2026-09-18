@@ -6,7 +6,14 @@ public enum ModFileKind
     Pmp = 1,
     Ttmp2 = 2,
     Image = 3,
-    Doc = 4
+    Doc = 4,
+
+    /// <summary>
+    /// An Anamnesis/Brio pose file. A pose library holds thousands of these, and without
+    /// their own kind they all counted as "Other" - so a pose pack looked like a folder
+    /// with no content at all.
+    /// </summary>
+    Pose = 5
 }
 
 public sealed class ModFile

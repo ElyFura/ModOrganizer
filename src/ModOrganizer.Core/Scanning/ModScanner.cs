@@ -84,9 +84,10 @@ public sealed class ModScanner
 
         // The path is resolved for the CURRENT user: the same logical root lives at a
         // different mount point on every machine that syncs the folder.
-        var root = conn.QuerySingleOrDefault<(long Id, string? Path, string DisplayName)>(
+        var root = conn.QuerySingleOrDefault<(long Id, string? Path, string DisplayName, string ScanMode, bool ScanModeDirty)>(
             """
-            SELECT id AS Id, mo_root_path(id, @uid) AS Path, display_name AS DisplayName
+            SELECT id AS Id, mo_root_path(id, @uid) AS Path, display_name AS DisplayName,
+                   scan_mode AS ScanMode, scan_mode_dirty AS ScanModeDirty
             FROM roots WHERE id=@id
             """,
             new { id = rootId, uid = _user?.UserId });
@@ -103,7 +104,8 @@ public sealed class ModScanner
                 "Unter Einstellungen kannst du den Ordner neu zuordnen.");
 
         // 1. Read the whole tree first. No DB work while we are I/O bound on the disk.
-        var disk = ReadFromDisk(root.Path!, progress, ct);
+        var nested = string.Equals(root.ScanMode, "auto", StringComparison.OrdinalIgnoreCase);
+        var disk = ReadFromDisk(root.Path!, nested, progress, ct);
 
         var filesSeen = disk.Sum(c => c.Mods.Sum(m => m.Files.Count));
         var modsSeen = disk.Sum(c => c.Mods.Count);
@@ -127,26 +129,31 @@ public sealed class ModScanner
 
         // Resolve each folder on disk to its database id once, so the file and metadata
         // passes below never have to search for it.
-        var resolved = new List<(long ModId, DiskMod Mod)>(modsSeen);
+        var resolved = new List<(long ModId, string Category, DiskMod Mod)>(modsSeen);
         foreach (var category in disk)
         {
             if (!categoryIds.TryGetValue(category.Name, out var categoryId)) continue;
             foreach (var mod in category.Mods)
             {
                 if (modIds.TryGetValue((categoryId, mod.FolderName), out var modId))
-                    resolved.Add((modId, mod));
+                    resolved.Add((modId, category.Name, mod));
             }
         }
 
         SyncFiles(conn, tx, resolved, known, hashes, ct);
 
-        var missing = MarkMissingMods(conn, tx, rootId, modIds.Values);
+        // A library whose structure was just reinterpreted legitimately loses most of its
+        // old rows, so the sync guard has to stand down for exactly this one scan.
+        var missing = MarkMissingMods(conn, tx, rootId, modIds.Values, ignoreSyncGuard: root.ScanModeDirty);
 
         // If the mod-level check refused to flag, the category-level one must not flag
         // either — otherwise a half-synced root loses its whole category list.
         var catsMissing = missing.Skipped
             ? 0
             : MarkMissingCategories(conn, tx, rootId, categoryIds.Values);
+
+        if (root.ScanModeDirty)
+            conn.Execute("UPDATE roots SET scan_mode_dirty = FALSE WHERE id = @r", new { r = rootId }, tx);
 
         tx.Commit();
 
@@ -161,19 +168,97 @@ public sealed class ModScanner
             missing.Vanished, missing.Skipped);
     }
 
+    /// <summary>
+    /// How deep a mod sits below its library.
+    ///
+    /// Fixed is the original model - one level of categories, one level of mods - and it
+    /// stays the default because that is how the gear libraries are laid out. Nested walks
+    /// down until it reaches folders that actually hold files, which is what a pose library
+    /// needs: Solo/NSFW/Sitzend/&lt;pose&gt;.
+    /// </summary>
+    private const int MaxNestedDepth = 6;
+
+    /// <summary>
+    /// A folder holds a mod rather than more folders. Files are the signal: a pose or an
+    /// archive lives next to its preview image, while a grouping folder holds only folders.
+    /// A folder with no children at all counts as a mod so that empty ones stay visible
+    /// instead of silently disappearing.
+    /// </summary>
+    public static bool LooksLikeMod(string dir)
+    {
+        try
+        {
+            using var files = Directory.EnumerateFiles(dir).GetEnumerator();
+            if (files.MoveNext()) return true;
+
+            using var dirs = Directory.EnumerateDirectories(dir).GetEnumerator();
+            return !dirs.MoveNext();
+        }
+        catch
+        {
+            return true;   // unreadable: treat as a leaf rather than descending blindly
+        }
+    }
+
+    /// <summary>
+    /// Collects (category path, mod folder) pairs below one top-level folder. The top level
+    /// is always a category, never a mod - that keeps the sidebar meaningful and matches
+    /// what the fixed mode did.
+    /// </summary>
+    private static void CollectNested(
+        string rootPath, string dir, int depth, List<(string Category, string ModDir)> into, CancellationToken ct)
+    {
+        foreach (var child in Directory.EnumerateDirectories(dir).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (depth >= MaxNestedDepth || LooksLikeMod(child))
+            {
+                var parent = Path.GetDirectoryName(child)!;
+                into.Add((Path.GetRelativePath(rootPath, parent), child));
+            }
+            else
+            {
+                CollectNested(rootPath, child, depth + 1, into, ct);
+            }
+        }
+    }
+
     private static List<DiskCategory> ReadFromDisk(
-        string rootPath, IProgress<ScanProgress>? progress, CancellationToken ct)
+        string rootPath, bool nested, IProgress<ScanProgress>? progress, CancellationToken ct)
     {
         var result = new List<DiskCategory>();
 
-        foreach (var categoryDir in Directory.EnumerateDirectories(rootPath).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+        // Category folder -> the mod folders belonging to it. In fixed mode that is simply
+        // one level down; in nested mode the category is the whole path above the mod.
+        var byCategory = new List<(string Name, string AbsPath, List<string> ModDirs)>();
+
+        foreach (var topDir in Directory.EnumerateDirectories(rootPath).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
         {
             ct.ThrowIfCancellationRequested();
-            var categoryName = Path.GetFileName(categoryDir);
 
-            var modDirs = Directory.EnumerateDirectories(categoryDir)
-                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            if (!nested)
+            {
+                byCategory.Add((Path.GetFileName(topDir), topDir,
+                    Directory.EnumerateDirectories(topDir)
+                        .OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList()));
+                continue;
+            }
+
+            var found = new List<(string Category, string ModDir)>();
+            CollectNested(rootPath, topDir, 1, found, ct);
+
+            foreach (var group in found.GroupBy(f => f.Category, StringComparer.OrdinalIgnoreCase))
+            {
+                byCategory.Add((group.Key, Path.Combine(rootPath, group.Key),
+                    group.Select(g => g.ModDir)
+                         .OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList()));
+            }
+        }
+
+        foreach (var (categoryName, categoryDir, modDirs) in byCategory)
+        {
+            ct.ThrowIfCancellationRequested();
 
             var mods = new List<DiskMod>(modDirs.Count);
             var filesDone = 0;
@@ -521,7 +606,7 @@ public sealed class ModScanner
     /// </summary>
     private static void SyncFiles(
         NpgsqlConnection conn, NpgsqlTransaction tx,
-        List<(long ModId, DiskMod Mod)> resolved,
+        List<(long ModId, string Category, DiskMod Mod)> resolved,
         Dictionary<FileKey, KnownFile> known,
         Dictionary<string, long?> hashes,
         CancellationToken ct)
@@ -529,15 +614,14 @@ public sealed class ModScanner
         ct.ThrowIfCancellationRequested();
         if (resolved.Count == 0) return;
 
-        // The category name is needed to look a file up in `known`, and `resolved` only
-        // carries the mod folder, so rebuild the pairing from the mod's own path.
+        // The category travels with each mod: in nested mode it is a multi-segment
+        // path ("Solo\\NSFW\\Sitzend"), so deriving it from the folder name would be wrong.
         var upsert = new List<(long ModId, DiskFile File, long? Hash)>();
         var present = new HashSet<(long, string)>();
         var modKeys = new Dictionary<long, (string Category, string Mod)>();
 
-        foreach (var (modId, mod) in resolved)
+        foreach (var (modId, categoryName, mod) in resolved)
         {
-            var categoryName = Path.GetFileName(Path.GetDirectoryName(mod.AbsPath)) ?? "";
             modKeys[modId] = (categoryName, mod.FolderName);
 
             foreach (var file in mod.Files)
@@ -646,7 +730,7 @@ public sealed class ModScanner
     /// </summary>
     private void InspectNewPmps(
         NpgsqlConnection conn,
-        List<(long ModId, DiskMod Mod)> resolved, CancellationToken ct)
+        List<(long ModId, string Category, DiskMod Mod)> resolved, CancellationToken ct)
     {
         var modIdArray = resolved.Select(r => r.ModId).Distinct().ToArray();
         if (modIdArray.Length == 0) return;
@@ -664,7 +748,7 @@ public sealed class ModScanner
 
         // mod id -> folder on disk, so we can turn a relative path into an absolute one.
         var modDirs = new Dictionary<long, string>();
-        foreach (var (modId, mod) in resolved) modDirs[modId] = mod.AbsPath;
+        foreach (var (modId, _, mod) in resolved) modDirs[modId] = mod.AbsPath;
 
         foreach (var f in todo)
         {
@@ -717,7 +801,8 @@ public sealed class ModScanner
         liveInDb >= 20 && vanished > liveInDb / 2;
 
     private MissingResult MarkMissingMods(
-        NpgsqlConnection conn, NpgsqlTransaction tx, long rootId, IEnumerable<long> seenModIds)
+        NpgsqlConnection conn, NpgsqlTransaction tx, long rootId, IEnumerable<long> seenModIds,
+        bool ignoreSyncGuard = false)
     {
         var seen = seenModIds.Distinct().ToArray();
 
@@ -730,7 +815,7 @@ public sealed class ModScanner
               AND category_id IN (SELECT id FROM categories WHERE root_id=@r)
             """, new { r = rootId, seen }, tx);
 
-        if (LooksLikeIncompleteSync(counts.Live, counts.Vanished))
+        if (!ignoreSyncGuard && LooksLikeIncompleteSync(counts.Live, counts.Vanished))
         {
             _log.LogWarning(
                 "Root {Root}: {Vanished} of {Live} mods not found on disk - not flagging, " +

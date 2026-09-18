@@ -48,6 +48,16 @@ if (args[0] == "tag")
         : ApplyTag(args[1], args[2], args.Skip(3).ToArray(), remove: false);
 }
 
+if (args[0] == "scanmode")
+{
+    if (args.Length < 4)
+    {
+        Console.Error.WriteLine("scanmode <connection-string> <root-id> <fixed|auto>");
+        return 2;
+    }
+    return SetScanMode(args[1], long.Parse(args[2]), args[3]);
+}
+
 if (args[0] == "profile")
 {
     if (args.Length < 4 || args[2] != "--as")
@@ -892,6 +902,31 @@ static int Missing(string connectionString, bool purge, int olderThanDays)
     Console.WriteLine($"gesamt: {total}");
     if (!purge && total > 0)
         Console.WriteLine("(Probelauf - mit --purge wandern sie in den Papierkorb)");
+    return 0;
+}
+
+/// <summary>Switches a library between the flat and the nested folder model.</summary>
+static int SetScanMode(string connectionString, long rootId, string mode)
+{
+    if (mode is not ("fixed" or "auto"))
+    {
+        Console.Error.WriteLine("mode muss 'fixed' oder 'auto' sein");
+        return 2;
+    }
+
+    var store = new DatabaseStore(new PostgresConnectionFactory(connectionString));
+    store.Initialize();
+
+    var roots = new RootService(store, null);
+    roots.SetScanMode(rootId, nested: mode == "auto");
+
+    using var conn = store.Open();
+    var row = conn.QuerySingle<(string Name, string Mode, bool Dirty)>(
+        "SELECT display_name AS Name, scan_mode AS Mode, scan_mode_dirty AS Dirty FROM roots WHERE id=@r",
+        new { r = rootId });
+
+    Console.WriteLine($"#{rootId} {row.Name}: scan_mode={row.Mode} (neu aufzubauen: {row.Dirty})");
+    Console.WriteLine("Jetzt neu scannen, damit die Struktur uebernommen wird.");
     return 0;
 }
 

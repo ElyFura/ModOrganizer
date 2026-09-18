@@ -48,6 +48,10 @@ public sealed class ModCard
     public int PmpCount { get; set; }
     public int TtmpCount { get; set; }
     public int ImageCount { get; set; }
+
+    /// <summary>How many .pose files the mod holds - the unit of a pose library.</summary>
+    public int PoseCount { get; set; }
+
     public bool IsMissing { get; set; }
 
     /// <summary>When a scan first failed to find this mod on disk.</summary>
@@ -79,6 +83,12 @@ public sealed record ModQuery
 {
     public long RootId { get; init; }
     public long? CategoryId { get; init; }
+
+    /// <summary>
+    /// Several categories at once - picking "Solo" in a nested library means every category
+    /// underneath it too. Empty means "no category restriction beyond CategoryId".
+    /// </summary>
+    public IReadOnlyList<long> CategoryIds { get; init; } = Array.Empty<long>();
     public string? SearchText { get; init; }
     public ModSort Sort { get; init; } = ModSort.CategoryThenName;
     public int MinRating { get; init; }
@@ -217,6 +227,7 @@ public sealed class ModLibraryService
             WHERE c.root_id = @r
               AND m.deleted_at IS NULL
               AND (@cat::bigint IS NULL OR m.category_id = @cat::bigint)
+              AND (cardinality(@cats::bigint[]) = 0 OR m.category_id = ANY(@cats::bigint[]))
               -- 0 = hide gone-from-disk mods, 1 = include them, 2 = only them.
               AND (@missing::int = 1
                    OR (@missing::int = 0 AND m.is_missing = FALSE)
@@ -256,6 +267,7 @@ public sealed class ModLibraryService
                    COUNT(*) FILTER (WHERE f.kind = 1) AS pmp_count,
                    COUNT(*) FILTER (WHERE f.kind = 2) AS ttmp_count,
                    COUNT(*) FILTER (WHERE f.kind = 3) AS image_count,
+                   COUNT(*) FILTER (WHERE f.kind = 5) AS pose_count,
                    COALESCE(SUM(f.size_bytes), 0)     AS total_size
             FROM mod_files f
             WHERE f.mod_id IN (SELECT id FROM target)
@@ -273,6 +285,7 @@ public sealed class ModLibraryService
                COALESCE(a.pmp_count, 0)  AS PmpCount,
                COALESCE(a.ttmp_count, 0) AS TtmpCount,
                COALESCE(a.image_count, 0) AS ImageCount,
+               COALESCE(a.pose_count, 0) AS PoseCount,
                COALESCE(a.total_size, 0) AS TotalSizeBytes,
                pv.cache_path AS PmpPreviewCache,
                t.is_missing AS IsMissing,
@@ -313,6 +326,7 @@ public sealed class ModLibraryService
     {
         r = q.RootId,
         cat = q.CategoryId,
+        cats = q.CategoryIds.Distinct().ToArray(),
         qLike = BuildSearchPattern(q.SearchText),
         minRating = q.MinRating,
         tagsAll = q.TagsAll.Distinct().ToArray(),
@@ -416,6 +430,7 @@ public sealed class ModLibraryService
                 PmpCount = row.PmpCount,
                 TtmpCount = row.TtmpCount,
                 ImageCount = row.ImageCount,
+                PoseCount = row.PoseCount,
                 IsMissing = row.IsMissing,
                 MissingSince = row.MissingSince is { } ms
                     ? new DateTimeOffset(DateTime.SpecifyKind(ms, DateTimeKind.Utc))
@@ -612,6 +627,7 @@ public sealed class ModLibraryService
         public int PmpCount { get; set; }
         public int TtmpCount { get; set; }
         public int ImageCount { get; set; }
+        public int PoseCount { get; set; }
         public long TotalSizeBytes { get; set; }
         public bool IsMissing { get; set; }
         public DateTime? MissingSince { get; set; }

@@ -322,7 +322,9 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task ReloadRootAsync(RootInfo? value)
     {
         Categories.Clear();
+        CategoryTree.Clear();
         SelectedCategory = null;
+        SelectedCategoryNode = null;
 
         if (value is null)
         {
@@ -332,6 +334,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         var categories = await _library.GetCategoriesAsync(value.Id).ConfigureAwait(true);
         foreach (var c in categories) Categories.Add(new CategoryItemViewModel(c));
+        RebuildCategoryTree();
 
         await RefreshModsAsync().ConfigureAwait(true);
         await RefreshMissingCountAsync().ConfigureAwait(true);
@@ -422,6 +425,73 @@ public sealed partial class MainViewModel : ObservableObject
 
     // All of these honour _suppressFilterRefresh so applying a smart collection, which
     // sets several of them at once, reloads the gallery once instead of four times.
+    /// <summary>The category hierarchy shown in the sidebar.</summary>
+    public ObservableCollection<CategoryNodeViewModel> CategoryTree { get; } = new();
+
+    [ObservableProperty] private CategoryNodeViewModel? _selectedCategoryNode;
+
+    /// <summary>Label above the gallery: the picked folder, or the whole library.</summary>
+    public string CategoryHeader => SelectedCategoryNode?.FullPath.Replace(
+        System.IO.Path.DirectorySeparatorChar.ToString(), " › ") ?? "Alle Mods";
+
+    partial void OnSelectedCategoryNodeChanged(CategoryNodeViewModel? value)
+    {
+        OnPropertyChanged(nameof(CategoryHeader));
+
+        // The flat selection stays in step for everything that still works on a single
+        // category (import, the category manager, the move menu).
+        SelectedCategory = value?.OwnCategoryId is { } id
+            ? Categories.FirstOrDefault(c => c.Id == id)
+            : null;
+
+        if (!_suppressFilterRefresh) RefreshMods();
+    }
+
+    /// <summary>
+    /// Turns the flat category rows into a tree by splitting their stored path. A library
+    /// in fixed mode has no separators, so it simply yields one level - the sidebar looks
+    /// exactly as before.
+    /// </summary>
+    private void RebuildCategoryTree()
+    {
+        CategoryTree.Clear();
+
+        var byPath = new Dictionary<string, CategoryNodeViewModel>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var cat in Categories.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            var segments = cat.Name.Split(
+                new[] { System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar },
+                StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length == 0) continue;
+
+            CategoryNodeViewModel? parent = null;
+            var path = "";
+
+            for (var i = 0; i < segments.Length; i++)
+            {
+                path = i == 0
+                    ? segments[i]
+                    : path + System.IO.Path.DirectorySeparatorChar + segments[i];
+
+                if (!byPath.TryGetValue(path, out var node))
+                {
+                    node = new CategoryNodeViewModel(segments[i], path);
+                    byPath[path] = node;
+                    if (parent is null) CategoryTree.Add(node);
+                    else parent.Children.Add(node);
+                }
+                parent = node;
+            }
+
+            // Only the deepest level carries the actual category row.
+            parent!.OwnCategoryId = cat.Id;
+            parent.OwnModCount = cat.ModCount;
+        }
+
+        OnPropertyChanged(nameof(CategoryTree));
+    }
+
     partial void OnSelectedCategoryChanged(CategoryItemViewModel? value)
     {
         if (!_suppressFilterRefresh) RefreshMods();
@@ -542,7 +612,9 @@ public sealed partial class MainViewModel : ObservableObject
     private ModQuery BuildQuery() => new()
     {
         RootId = SelectedRoot!.Id,
-        CategoryId = SelectedCategory?.Id,
+        // A parent node means "this folder and everything below it".
+        CategoryId = null,
+        CategoryIds = SelectedCategoryNode?.AllCategoryIds ?? Array.Empty<long>(),
         SearchText = SearchText,
         Sort = SelectedSort?.Value ?? ModSort.CategoryThenName,
         MinRating = MinRating,

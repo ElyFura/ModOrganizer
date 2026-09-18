@@ -230,10 +230,19 @@
                         </ItemsControl>
 
                         <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                            <Border Background="{DynamicResource Bg3}" CornerRadius="4" Padding="6,2" Margin="0,0,4,0">
+                            <Border Background="{DynamicResource Bg3}" CornerRadius="4" Padding="6,2" Margin="0,0,4,0"
+                                    Visibility="{Binding HasArchives, Converter={StaticResource BoolToVisible}}">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="pmp" Foreground="{DynamicResource TextDim}" FontSize="10" Margin="0,0,4,0" />
                                     <TextBlock Text="{Binding PmpCount}" Foreground="{DynamicResource Text}" FontSize="10" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                            <!-- Posen: die Einheit einer Posen-Bibliothek -->
+                            <Border Background="{DynamicResource Bg3}" CornerRadius="4" Padding="6,2" Margin="0,0,4,0"
+                                    Visibility="{Binding PoseCount, Converter={StaticResource BoolToVisible}, FallbackValue=Collapsed}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Posen" Foreground="{DynamicResource TextDim}" FontSize="10" Margin="0,0,4,0" />
+                                    <TextBlock Text="{Binding PoseCount}" Foreground="{DynamicResource Text}" FontSize="10" FontWeight="SemiBold" />
                                 </StackPanel>
                             </Border>
                             <Border Background="{DynamicResource Bg3}" CornerRadius="4" Padding="6,2" Margin="0,0,4,0"
@@ -370,26 +379,40 @@
 
                 <!-- Bounded so the tag filter below stays on screen instead of sitting
                      past 14 categories' worth of scrolling. -->
-                <ListBox Style="{DynamicResource SidebarListBox}"
-                         ItemsSource="{Binding Categories}"
-                         SelectedItem="{Binding SelectedCategory}"
-                         MaxHeight="170"
-                         ScrollViewer.VerticalScrollBarVisibility="Auto">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <DockPanel LastChildFill="True">
+                <!-- Hierarchie statt flacher Liste: eine verschachtelte Bibliothek speichert
+                     die Kategorie als Pfad ("Solo\NSFW\Sitzend"). Ein Elternteil
+                     auszuwählen zeigt alles darunter. -->
+                <Button Content="Alle Mods" Margin="20,0,20,4" Padding="8,5" HorizontalContentAlignment="Left"
+                        Click="ClearCategory_Click" FontSize="12"
+                        ToolTip="Kategorie-Auswahl aufheben" />
+                <TreeView x:Name="CategoryTreeView" ItemsSource="{Binding CategoryTree}"
+                          MaxHeight="220" Margin="14,0,14,0"
+                          SelectedItemChanged="CategoryTree_SelectedItemChanged"
+                          Background="Transparent" BorderThickness="0"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <TreeView.ItemContainerStyle>
+                        <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                        </Style>
+                    </TreeView.ItemContainerStyle>
+                    <TreeView.Resources>
+                        <HierarchicalDataTemplate DataType="{x:Type vm:CategoryNodeViewModel}"
+                                                  ItemsSource="{Binding Children}">
+                            <DockPanel LastChildFill="True" MinWidth="150">
                                 <Border DockPanel.Dock="Right" Background="#2E2F3B" CornerRadius="8"
                                         Padding="6,1" VerticalAlignment="Center" MinWidth="26">
-                                    <TextBlock Text="{Binding ModCount}" FontSize="10" FontWeight="SemiBold"
+                                    <TextBlock Text="{Binding BadgeText}" FontSize="10" FontWeight="SemiBold"
                                                Foreground="{DynamicResource TextDim}"
                                                HorizontalAlignment="Center" />
                                 </Border>
                                 <TextBlock Text="{Binding Name}" VerticalAlignment="Center" FontSize="13"
-                                           TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
+                                           TextTrimming="CharacterEllipsis" Margin="0,0,8,0"
+                                           ToolTip="{Binding FullPath}" />
                             </DockPanel>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+                        </HierarchicalDataTemplate>
+                    </TreeView.Resources>
+                </TreeView>
 
                 <!-- Tag filter: each chip cycles Off -> include -> exclude on click -->
                 <Border Padding="20,18,20,6">
@@ -515,70 +538,27 @@
 
             <Border Grid.Row="0" Background="{DynamicResource Bg0}" Padding="28,20,20,16"
                     BorderBrush="{DynamicResource Border1}" BorderThickness="0,0,0,1">
-                <DockPanel LastChildFill="True">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="Größe:" VerticalAlignment="Center" Foreground="{DynamicResource TextDim}" Margin="0,0,6,0" />
-                        <Slider Value="{Binding ThumbnailSize}" Minimum="180" Maximum="440"
-                                TickFrequency="20" IsSnapToTickEnabled="True"
-                                Width="100" VerticalAlignment="Center" Margin="0,0,14,0" />
-                        <TextBlock Text="Penumbra:" VerticalAlignment="Center"
-                                   Foreground="{DynamicResource TextDim}" Margin="0,0,6,0"
-                                   Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}" />
-                        <ComboBox ItemsSource="{Binding PenumbraFilterModes}" SelectedItem="{Binding PenumbraFilter}"
-                                  Width="100" Margin="0,0,6,0"
-                                  Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}" />
-                        <ComboBox ItemsSource="{Binding PenumbraCollectionFilters}"
-                                  SelectedItem="{Binding PenumbraCollectionFilter}"
-                                  Width="180" Margin="0,0,14,0"
-                                  Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}"
-                                  ToolTip="Nur Mods aus dieser Collection" />
-                        <!-- Wie frisch der geteilte Penumbra-Stand der anderen ist -->
-                        <TextBlock VerticalAlignment="Center" Margin="0,0,14,0" FontSize="11"
-                                   Text="{Binding PenumbraUsersText}"
-                                   ToolTip="Stand des geteilten Penumbra-Abgleichs je Benutzer"
-                                   Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="{DynamicResource TextFaint}" />
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding PenumbraHasStale}" Value="True">
-                                            <Setter Property="Foreground" Value="#E8B45A" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
-                        <TextBlock Text="Sortierung:" VerticalAlignment="Center" Foreground="{DynamicResource TextDim}" Margin="0,0,6,0" />
-                        <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SelectedSort}"
-                                  Width="190" Margin="0,0,14,0" />
-                        <Button Command="{Binding BulkRenameCommand}" Padding="10,6" Margin="0,0,6,0"
-                                Visibility="{Binding SelectedCount, Converter={StaticResource BoolToVisible}}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Sammel-Umbenennung " />
-                                <TextBlock Text="(" Foreground="{DynamicResource TextDim}" />
-                                <TextBlock Text="{Binding SelectedCount}" Foreground="{DynamicResource TextDim}" />
-                                <TextBlock Text=")" Foreground="{DynamicResource TextDim}" />
-                            </StackPanel>
-                        </Button>
-                        <Button Command="{Binding ClearSelectionCommand}" Content="Zurücksetzen" Padding="10,6" Margin="0,0,6,0"
-                                Visibility="{Binding SelectedCount, Converter={StaticResource BoolToVisible}}" />
-                        <Button Command="{Binding ToggleViewModeCommand}" Padding="10,6">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="&#xE8A9;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                                           FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding IsFolderView, Converter={StaticResource ViewModeLabel}}"
-                                           VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
+                <!-- Zwei Zeilen statt einer: die Bedienelemente sind zusammen gut 800 Pixel
+                     breit und waren rechts angedockt, also blieb dem Titel bei schmalem
+                     Fenster fast nichts - er wurde auf "So" gekuerzt und die Hinweise
+                     darunter ueberlagerten sich. Jetzt bekommt der Titel die volle Breite
+                     und die Bedienelemente brechen um, statt sich zu quetschen. -->
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
 
-                    <StackPanel>
-                        <TextBlock Style="{DynamicResource H1}">
-                            <Run Text="{Binding SelectedCategory.Name, Mode=OneWay, FallbackValue='All mods'}" />
+                    <StackPanel Grid.Row="0">
+                        <!-- Ein tiefer Pfad wie "Solo › NSFW › Stehend" darf die Leiste nicht
+                             auseinanderdruecken. -->
+                        <TextBlock Style="{DynamicResource H1}" TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding CategoryHeader}">
+                            <Run Text="{Binding CategoryHeader, Mode=OneWay, FallbackValue='Alle Mods'}" />
                         </TextBlock>
                         <TextBlock Style="{DynamicResource Caption}" Margin="0,3,0,0">
                             <Run Text="{Binding VisibleModCount, Mode=OneWay}" />
-                            <Run Text=" Mods sichtbar · .pmp/.ttmp2-Dateien hierher ziehen zum Importieren" />
+                            <Run Text=" Mods sichtbar · Dateien hierher ziehen zum Importieren" />
                         </TextBlock>
                         <Border Background="#2A2440" CornerRadius="6" Padding="8,3" Margin="0,6,0,0"
                                 HorizontalAlignment="Left"
@@ -616,7 +596,78 @@
                             </StackPanel>
                         </Border>
                     </StackPanel>
-                </DockPanel>
+
+                    <!-- Gruppen statt Einzelteile: so bricht nie eine Beschriftung von ihrem
+                         Bedienelement weg, und umbrochene Zeilen behalten Abstand. -->
+                    <WrapPanel Grid.Row="1" Orientation="Horizontal" Margin="0,14,0,-8">
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,18,8" VerticalAlignment="Center">
+                            <TextBlock Text="Größe:" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextDim}" Margin="0,0,6,0" />
+                            <Slider Value="{Binding ThumbnailSize}" Minimum="180" Maximum="440"
+                                    TickFrequency="20" IsSnapToTickEnabled="True"
+                                    Width="100" VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,18,8" VerticalAlignment="Center"
+                                    Visibility="{Binding PenumbraAvailable, Converter={StaticResource BoolToVisible}}">
+                            <TextBlock Text="Penumbra:" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextDim}" Margin="0,0,6,0" />
+                            <ComboBox ItemsSource="{Binding PenumbraFilterModes}" SelectedItem="{Binding PenumbraFilter}"
+                                      Width="100" Margin="0,0,6,0" />
+                            <ComboBox ItemsSource="{Binding PenumbraCollectionFilters}"
+                                      SelectedItem="{Binding PenumbraCollectionFilter}"
+                                      Width="180" Margin="0,0,10,0"
+                                      ToolTip="Nur Mods aus dieser Collection" />
+                            <!-- Wie frisch der geteilte Penumbra-Stand der anderen ist -->
+                            <TextBlock VerticalAlignment="Center" FontSize="11" MaxWidth="220"
+                                       TextTrimming="CharacterEllipsis"
+                                       Text="{Binding PenumbraUsersText}"
+                                       ToolTip="Stand des geteilten Penumbra-Abgleichs je Benutzer">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{DynamicResource TextFaint}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding PenumbraHasStale}" Value="True">
+                                                <Setter Property="Foreground" Value="#E8B45A" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,18,8" VerticalAlignment="Center">
+                            <TextBlock Text="Sortierung:" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextDim}" Margin="0,0,6,0" />
+                            <ComboBox ItemsSource="{Binding SortOptions}" SelectedItem="{Binding SelectedSort}"
+                                      Width="190" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,18,8" VerticalAlignment="Center"
+                                    Visibility="{Binding SelectedCount, Converter={StaticResource BoolToVisible}}">
+                            <Button Command="{Binding BulkRenameCommand}" Padding="10,6" Margin="0,0,6,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Sammel-Umbenennung " />
+                                    <TextBlock Text="(" Foreground="{DynamicResource TextDim}" />
+                                    <TextBlock Text="{Binding SelectedCount}" Foreground="{DynamicResource TextDim}" />
+                                    <TextBlock Text=")" Foreground="{DynamicResource TextDim}" />
+                                </StackPanel>
+                            </Button>
+                            <Button Command="{Binding ClearSelectionCommand}" Content="Zurücksetzen" Padding="10,6" />
+                        </StackPanel>
+
+                        <Button Command="{Binding ToggleViewModeCommand}" Padding="10,6" Margin="0,0,0,8"
+                                VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE8A9;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                           FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding IsFolderView, Converter={StaticResource ViewModeLabel}}"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </WrapPanel>
+                </Grid>
             </Border>
 
             <Grid Grid.Row="1" Background="{DynamicResource Bg0}"

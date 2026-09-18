@@ -112,6 +112,13 @@ public sealed partial class ModCardViewModel : ObservableObject
     public int PmpCount => Model.PmpCount;
     public int TtmpCount => Model.TtmpCount;
     public int ImageCount => Model.ImageCount;
+    public int PoseCount => Model.PoseCount;
+
+    /// <summary>
+    /// A pose pack ships no archive, so the "pmp" chip would always read 0 there. Hide it
+    /// and show the pose count instead.
+    /// </summary>
+    public bool HasArchives => Model.PmpCount > 0 || Model.TtmpCount > 0;
     public bool IsMissing => Model.IsMissing;
 
     // ---- who is looking at this mod right now ----

@@ -70,6 +70,9 @@
                                         Width="*" MinWidth="260" IsReadOnly="True" />
                     <DataGridTextColumn Header="Inhalt" Binding="{Binding CountsText}" Width="130"
                                         IsReadOnly="True" />
+                    <DataGridCheckBoxColumn Header="Verschachtelt"
+                                            Binding="{Binding NestedScan, UpdateSourceTrigger=PropertyChanged}"
+                                            Width="95" />
                 </DataGrid.Columns>
             </DataGrid>
 
@@ -101,6 +104,12 @@
                                 Padding="12,7" />
                         <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0"
                                    Text="Blendet die Bibliothek nur bei dir aus. Andere Benutzer behalten sie." />
+
+                        <TextBlock Text="ORDNERSTRUKTUR" Style="{StaticResource Label}" Margin="0,22,0,6" />
+                        <CheckBox Content="Unterordner verschachtelt" IsChecked="{Binding Selected.NestedScan}"
+                                  Foreground="{StaticResource Text}" />
+                        <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Text="Normalerweise gilt Bibliothek / Kategorie / Mod. Ist das hier gesetzt, wird weiter nach unten gesucht, bis Ordner kommen, die wirklich Dateien enthalten — richtig f&#252;r Posen-Sammlungen wie Solo / NSFW / Sitzend / Pose." />
 
                         <Button Content="Bibliothek löschen" Command="{Binding DeleteRootCommand}"
                                 Padding="12,7" Margin="0,12,0,0"

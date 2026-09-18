@@ -10,6 +10,7 @@ public static class FileClassifier
         return ext switch
         {
             ".pmp" => ModFileKind.Pmp,
+            ".pose" => ModFileKind.Pose,
             ".ttmp2" => ModFileKind.Ttmp2,
             ".jpg" or ".jpeg" or ".png" or ".webp" or ".bmp" or ".gif" => ModFileKind.Image,
             ".txt" or ".md" or ".pdf" or ".docx" or ".doc" or ".html" or ".htm" or ".rtf" => ModFileKind.Doc,

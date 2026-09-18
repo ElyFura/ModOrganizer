@@ -171,6 +171,26 @@ public partial class MainWindow : Window
         if (DataContext is MainViewModel vm) vm.ShowMissingOnly = false;
     }
 
+    private void CategoryTree_SelectedItemChanged(object sender,
+        RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (DataContext is MainViewModel vm)
+            vm.SelectedCategoryNode = e.NewValue as CategoryNodeViewModel;
+    }
+
+    /// <summary>Back to the whole library. A TreeView cannot clear its own selection.</summary>
+    private void ClearCategory_Click(object sender, RoutedEventArgs e)
+    {
+        if (CategoryTreeView.SelectedItem is TreeViewItem tvi) tvi.IsSelected = false;
+        foreach (var item in CategoryTreeView.Items)
+        {
+            if (CategoryTreeView.ItemContainerGenerator.ContainerFromItem(item) is TreeViewItem c)
+                c.IsSelected = false;
+        }
+
+        if (DataContext is MainViewModel vm) vm.SelectedCategoryNode = null;
+    }
+
     private void Toast_Click(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement fe && fe.Tag is Services.Toast t)
