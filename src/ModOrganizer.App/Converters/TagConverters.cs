@@ -16,6 +16,16 @@ public sealed class NotNullToBoolConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+/// <summary>Negates a bool - "enabled while not busy".</summary>
+public sealed class InverseBoolConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is not bool b || !b;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is not bool b || !b;
+}
+
 /// <summary>Visible when the bound value is set - used for the "is viewing a mod" dot.</summary>
 public sealed class NotNullToVisibleConverter : IValueConverter
 {

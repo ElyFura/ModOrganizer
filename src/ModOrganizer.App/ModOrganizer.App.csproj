@@ -21,6 +21,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+
+    <!--
+      Die Version ist die Grundlage des Auto-Updates: die App vergleicht sie mit dem
+      neuesten GitHub-Release. Vor einem Release hier hochzaehlen und denselben Wert als
+      Tag verwenden (v1.1.0), sonst haelt sich die App fuer aktuell.
+    -->
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
+    <Product>FFXIV Mod Organizer</Product>
   </PropertyGroup>
 
   <!--

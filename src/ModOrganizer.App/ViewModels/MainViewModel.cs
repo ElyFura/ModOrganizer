@@ -65,6 +65,82 @@ public sealed partial class MainViewModel : ObservableObject
 
     public bool HasMissing => MissingCount > 0;
 
+    // ---- application updates ----
+
+    public UpdateService? Updates { get; set; }
+
+    private AvailableUpdate? _available;
+
+    [ObservableProperty] private bool _updateAvailable;
+    [ObservableProperty] private string _updateText = "";
+    [ObservableProperty] private bool _updateBusy;
+
+    public string CurrentVersionText => "Version " + UpdateService.CurrentVersion.ToString(3);
+
+    public void SetAvailableUpdate(AvailableUpdate update)
+    {
+        _available = update;
+        UpdateText = $"Version {update.Version.ToString(3)} verfügbar " +
+                     $"({update.SizeBytes / (1024 * 1024)} MB)";
+        UpdateAvailable = true;
+    }
+
+    /// <summary>
+    /// Downloads the new build and hands over to it. The running .exe cannot replace itself,
+    /// so the downloaded one does the swap and starts us again.
+    /// </summary>
+    [RelayCommand]
+    private async Task InstallUpdate()
+    {
+        if (Updates is null || _available is null || UpdateBusy) return;
+
+        var update = _available;
+        UpdateBusy = true;
+
+        try
+        {
+            var progress = new Progress<double>(p =>
+                UpdateText = $"Lade Version {update.Version.ToString(3)}… {p:P0}");
+
+            var file = await Updates.DownloadAsync(update, progress).ConfigureAwait(true);
+            if (file is null)
+            {
+                UpdateText = "Download unvollständig — später erneut versuchen";
+                UpdateBusy = false;
+                return;
+            }
+
+            var answer = MessageBox.Show(
+                $"Version {update.Version.ToString(3)} ist geladen.\n\n" +
+                "Die App schließt sich jetzt, tauscht sich aus und startet neu. " +
+                "Laufende Scans werden abgebrochen.\n\nJetzt aktualisieren?",
+                "Update installieren", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (answer != MessageBoxResult.Yes)
+            {
+                UpdateText = $"Version {update.Version.ToString(3)} bereit — beim nächsten Mal";
+                UpdateBusy = false;
+                return;
+            }
+
+            if (Updates.StartHandover(file))
+            {
+                Application.Current.Shutdown();
+            }
+            else
+            {
+                UpdateText = "Austausch konnte nicht gestartet werden";
+                UpdateBusy = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Update install failed");
+            UpdateText = "Update fehlgeschlagen: " + ex.Message;
+            UpdateBusy = false;
+        }
+    }
+
     // ---- realtime link ----
 
     /// <summary>
@@ -935,6 +1011,8 @@ public sealed partial class MainViewModel : ObservableObject
             StatusText = $"Scan fertig: {summary.CategoriesSeen} Kat., {summary.ModsSeen} Mods, {summary.FilesSeen} Dateien in {summary.Duration.TotalSeconds:F1}s";
             if (summary.ModsMarkedMissing > 0)
                 StatusText += $" · {summary.ModsMarkedMissing} nicht mehr im Ordner";
+            if (summary.ObsoleteRemoved > 0)
+                StatusText += $" · {summary.ObsoleteRemoved} Sammelordner-Einträge bereinigt";
             _log.LogInformation("Rescan: {Mods} mods in {Sec}s",
                 summary.ModsSeen, summary.Duration.TotalSeconds);
             await LoadAsync().ConfigureAwait(true);
