@@ -359,7 +359,9 @@ public sealed partial class MainViewModel : ObservableObject
         _dupes = dupes;
         _sp = sp;
         _log = log;
-        _selectedSort = SortOptions[0];
+        // Neu dazugekommene Mods oben: das ist der Einstieg, den man beim Öffnen fast
+        // immer will - nach dem Alphabet muss man Neuzugänge dagegen suchen.
+        _selectedSort = SortOptions.First(o => o.Value == ModSort.AddedNewest);
     }
 
     /// <summary>Kept for callers that fire and forget; the work happens in <see cref="LoadAsync"/>.</summary>
@@ -692,7 +694,7 @@ public sealed partial class MainViewModel : ObservableObject
         CategoryId = null,
         CategoryIds = SelectedCategoryNode?.AllCategoryIds ?? Array.Empty<long>(),
         SearchText = SearchText,
-        Sort = SelectedSort?.Value ?? ModSort.CategoryThenName,
+        Sort = SelectedSort?.Value ?? ModSort.AddedNewest,
         MinRating = MinRating,
         // Included tags go into the AND or the OR bucket depending on the toggle; the
         // excluded ones always mean "must not carry".
