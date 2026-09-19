@@ -1,8 +1,12 @@
 name: Release
 
-# Ein Tag wie v1.1.0 baut die exe und haengt sie an ein GitHub-Release.
-# Genau dort sucht die App nach Updates, deshalb muss der Tag zur <Version>
-# in ModOrganizer.App.csproj passen - der Schritt unten prueft das.
+# Zwei Wege zum selben Ergebnis:
+#   - Tag v1.2.0 pushen        -> Tag muss zur <Version> passen, sonst Abbruch
+#   - Workflow von Hand starten -> nimmt die <Version> aus dem csproj als Tag
+#
+# Der zweite Weg existiert, weil ein Tag-Push nichts ausloest, solange Actions fuer das
+# Repository noch nicht aktiv war - dann laesst sich das Release nachtraeglich anstossen,
+# ohne den Tag loeschen und neu setzen zu muessen.
 on:
   push:
     tags:
@@ -23,16 +27,25 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Version gegen Tag pruefen
+      - name: Version bestimmen
+        id: version
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}" -replace '^v', ''
           $csproj = [xml](Get-Content src/ModOrganizer.App/ModOrganizer.App.csproj)
           $version = ($csproj.Project.PropertyGroup.Version | Where-Object { $_ }) -join ''
-          if ($tag -ne $version) {
-            throw "Tag $tag passt nicht zu <Version>$version</Version>. Sonst haelt sich die neue exe fuer aktuell."
+          if (-not $version) { throw "Keine <Version> in ModOrganizer.App.csproj gefunden." }
+
+          # Bei einem Tag-Push muss der Tag zur Version passen. Sonst haelt sich die
+          # veroeffentlichte exe fuer aktuell und niemand bekaeme je wieder ein Update.
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}" -replace '^v', ''
+            if ($tag -ne $version) {
+              throw "Tag $tag passt nicht zu <Version>$version</Version>."
+            }
           }
-          "Version $version bestaetigt" | Write-Host
+
+          "tag=v$version" | Out-File $env:GITHUB_OUTPUT -Append
+          Write-Host "Release-Version: $version"
 
       - name: Tests
         run: dotnet test src/ModOrganizer.Core.Tests/ModOrganizer.Core.Tests.csproj -c Release --nologo
@@ -50,6 +63,7 @@ jobs:
       - name: Release anlegen
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
           files: |
             publish/ModOrganizer.App.exe
             publish/ModOrganizer.App.exe.sha256
