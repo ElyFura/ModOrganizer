@@ -27,9 +27,9 @@
       neuesten GitHub-Release. Vor einem Release hier hochzaehlen und denselben Wert als
       Tag verwenden (v1.1.0), sonst haelt sich die App fuer aktuell.
     -->
-    <Version>1.1.0</Version>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
+    <Version>1.1.1</Version>
+    <AssemblyVersion>1.1.1.0</AssemblyVersion>
+    <FileVersion>1.1.1.0</FileVersion>
     <Product>FFXIV Mod Organizer</Product>
   </PropertyGroup>
 

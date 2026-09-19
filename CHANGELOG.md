@@ -1,5 +1,13 @@
 # Änderungen
 
+## v1.1.1
+
+- Standardsortierung ist jetzt **Zuletzt hinzugefügt**. Beim Öffnen standen neue Mods
+  vorher irgendwo mitten in der alphabetischen Liste.
+- Release-Workflow: der manuelle Start brach ab, weil er den Branchnamen mit der
+  Projektversion verglich. Die Version kommt jetzt immer aus dem csproj, der Tag-Vergleich
+  nur noch beim Tag-Push.
+
 ## v1.1.0
 
 Erste Version mit Selbstaktualisierung. Ältere Builds müssen einmalig von Hand ersetzt
